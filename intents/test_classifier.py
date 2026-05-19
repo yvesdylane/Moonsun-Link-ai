@@ -1,4 +1,5 @@
 from intents.classifier import IntentClassifier
+from entities.extractor import EntityExtractor
 
 clf = IntentClassifier()
 
@@ -13,3 +14,15 @@ tests = [
 for text in tests:
     result = clf.classify(text)
     print(f"{text!r:50} → {result}")
+
+ex = EntityExtractor()
+
+tests = [
+    "find me corn in yaounde",
+    "who is selling tomatoes in douala",
+    "i want to sell my cassava",
+    "what is the weather today",
+]
+
+for text in tests:
+    print(f"{text!r:45} → {ex.extract(text)}")
