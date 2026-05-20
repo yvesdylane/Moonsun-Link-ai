@@ -1,5 +1,5 @@
 from core.pipeline import AssistantPipeline
-from db.controller.listingController import get_listing
+from db.controller.listingController import get_listings
 
 class ToolRouter:
     def __init__(self):
@@ -22,10 +22,20 @@ class ToolRouter:
         return handler(entities)
 
     def _create_listing(self, entities):
-        return {}
-    def _search_listings(self, entities): ...
+        print(f"creating listing for {entities}")
+        return {"status": "ok", "message": f"creating listings for {entities}"}
+    def _search_listings(self, entities):
+        listings = get_listings(1)
+        return {"status": "ok", "data": listings, "filters": entities}
     def _get_my_listings(self, entities):
-        get_listing()
-    def _delete_listing(self, entities): ...
-    def _update_listing(self, entities): ...
-    def _unknown(self, entities): ...
+        print(f"searching listing for {entities}")
+        return {"status": "ok", "message": f"searching listings for {entities}"}
+    def _delete_listing(self, entities):
+        print(f"delete listing {entities}")
+        return {"status": "ok", "message": f"delete listings for {entities}"}
+    def _update_listing(self, entities):
+        print(f"updating listing f{entities}")
+        return {"status": "ok", "message": f"updating listings for {entities}"}
+    def _unknown(self, entities):
+        print(f"we don't know what is happening here f{entities}")
+        return {"status": "ok", "message": f"can't find what you want for {entities}"}
