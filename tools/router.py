@@ -1,12 +1,18 @@
 from core.pipeline import AssistantPipeline
 from db.controller.userController import get_user_role
-from db.controller.listingController import get_listings, create_listing
+from db.controller.listingController import get_listings, create_listing, delete_listing
+from db.controller.stateController import get_state, set_state, clear_state
 
 class ToolRouter:
     def __init__(self):
         self.pipeline = AssistantPipeline()
 
     def handle(self, text: str, user_id: str) -> dict:
+        # check conversation state first
+        state = get_state(user_id)
+        if state and state["state"] == "awaiting_delete_choice":
+            return self._handle_delete_choice(text, user_id, state["context"])
+
         result = self.pipeline.process(text)
         intent = result["intent"]["intent"]
         entities = result["entities"]
@@ -26,7 +32,6 @@ class ToolRouter:
         role = get_user_role(user_id)
         if role != "farmer":
             return {"status": "error", "message": "Only farmers can create listings"}
-
         if not entities.get("product"):
             return {"status": "error", "message": "What crop do you want to sell?"}
         if not entities.get("quantity"):
@@ -51,15 +56,51 @@ class ToolRouter:
         return {"status": "ok", "data": listings, "filters": entities}
 
     def _get_my_listings(self, entities, user_id):
-        # user_id will come from the API layer later
-        listings = get_listings(crop_name=entities.get("product"))
+        listings = get_listings(
+            crop_name=entities.get("product"),
+            user_id=user_id
+        )
         return {"status": "ok", "data": listings}
+
     def _delete_listing(self, entities, user_id):
-        print(f"delete listing {entities}")
-        return {"status": "ok", "message": f"delete listings for {entities}"}
+        if not entities.get("product"):
+            return {"status": "error", "message": "Which crop listing do you want to delete?"}
+
+        # get all their listings for that crop
+        listings = get_listings(crop_name=entities.get("product"), user_id=user_id)
+
+        if not listings:
+            return {"status": "error", "message": f"You have no {entities.get('product')} listings"}
+
+        if len(listings) == 1:
+            # only one — delete directly
+            clear_state(user_id)
+            return delete_listing(listing_id=listings[0][0], user_id=user_id)
+
+        # multiple listings — ask which one
+        options = "\n".join([
+            f"{i+1}) {l[3]}kg at {l[4]} XAF"
+            for i, l in enumerate(listings)
+        ])
+        set_state(user_id, "awaiting_delete_choice", {
+            "listings": [[l[0], l[3], l[4]] for l in listings]  # [id, quantity, price]
+        })
+        return {"status": "ok", "message": f"Which listing do you want to delete?\n{options}"}
+
+    def _handle_delete_choice(self, text: str, user_id: str, context: dict) -> dict:
+        listings = context["listings"]
+        try:
+            choice = int(text.strip()) - 1
+            if choice < 0 or choice >= len(listings):
+                return {"status": "error", "message": f"Please reply with a number between 1 and {len(listings)}"}
+            listing_id = listings[choice][0]
+            clear_state(user_id)
+            return delete_listing(listing_id=listing_id, user_id=user_id)
+        except ValueError:
+            return {"status": "error", "message": f"Please reply with a number between 1 and {len(listings)}"}
+
     def _update_listing(self, entities, user_id):
-        print(f"updating listing f{entities}")
-        return {"status": "ok", "message": f"updating listings for {entities}"}
+        return {"status": "ok", "message": "Update listing coming soon"}
+
     def _unknown(self, entities, user_id):
-        print(f"we don't know what is happening here f{entities}")
-        return {"status": "ok", "message": f"can't find what you want for {entities}"}
+        return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}
