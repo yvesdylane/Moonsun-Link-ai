@@ -14,3 +14,15 @@ def check_if_user_exist(phone):
         return True, user[0]
     return False, None
 
+def create_user_from_whatsapp(phone: str, name: str) -> str:
+    cur = conn.cursor()
+    query = """
+        INSERT INTO users (name, phone, whatsapp_number, role, region, lang)
+        VALUES (%s, %s, %s, 'farmer', 'General', 'en')
+        RETURNING id
+    """
+    cur.execute(query, (name, phone, phone))
+    user_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    return user_id

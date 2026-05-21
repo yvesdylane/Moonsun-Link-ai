@@ -31,4 +31,4 @@ class IntentClassifier:
             intent_name = examples[match[2]][1]
             return {"intent": intent_name, "confidence": round(match[1] / 100, 2), "method": "fuzzy"}
 
-        return {"intent": "unknown", "confidence": 0.0}
+        return {"intent": "unknown", "confidence": 0.0, "method": "none"}
