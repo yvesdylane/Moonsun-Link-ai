@@ -28,6 +28,8 @@ async def webhook(request: Request):
             user_id = create_user_from_whatsapp(phone, name)
 
         result = router.handle(message, str(user_id))
+        print(f"MESSAGE: {message}")
+        print(f"RESULT: {result}")
         return {"status": "received", "response": result}
 
     return {"status": "received"}
