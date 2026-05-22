@@ -34,6 +34,8 @@ async def webhook(request: Request):
 
         # get message text
         message = data.get("message")
+        message_id = data.get("message_id")
+        print(f"EVENT message_id={message_id} is_sender={data.get('is_sender')}")
 
         # handle voice note
         if not message:
