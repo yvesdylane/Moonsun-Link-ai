@@ -2,8 +2,8 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from tools.router import ToolRouter
 from db.controller.userController import check_if_user_exist, create_user_from_whatsapp
-from utils.whatsapp import send_whatsapp_reply
-from utils.formatter import format_listings
+from utils.whatsapp import send_whatsapp_reply, send_whatsapp_image
+from utils.formatter import format_listings, get_listing_images
 from utils.translator import translate_reply
 from utils.transcriber import transcribe_audio
 from utils.audio_downloader import download_voice_note, download_attachment
@@ -72,14 +72,23 @@ async def webhook(request: Request):
         print(f"MESSAGE: {message}")
         print(f"RESULT: {result}")
 
+        # replace the reply section with:
         detected_lang = result.get("language", "en")
         if "data" in result:
             reply = format_listings(result["data"])
+            image_urls = get_listing_images(result["data"])
         else:
             reply = result.get("message", "Done")
+            image_urls = []
 
         reply = translate_reply(reply, detected_lang)
         send_whatsapp_reply(chat_id, reply)
+
+        # send images as attachments
+        for image_url in image_urls:
+            print(f"SENDING IMAGE: {image_url}")
+            response = send_whatsapp_image(chat_id, image_url)
+            print(f"IMAGE SEND RESPONSE: {response}")
 
         return {"status": "received", "response": result}
 

@@ -4,7 +4,6 @@ def format_listings(listings: list) -> str:
 
     lines = []
     for i, l in enumerate(listings):
-        listing_id = l[0]
         quantity = l[3]
         price = l[4]
         town = l[5] or "location not set"
@@ -18,3 +17,7 @@ def format_listings(listings: list) -> str:
         )
 
     return "\n\n".join(lines)
+
+def get_listing_images(listings: list) -> list[str]:
+    """Returns list of image URLs from listings that have one."""
+    return [l[8] for l in listings if l[8]]
