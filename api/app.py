@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from tools.router import ToolRouter
 from db.controller.userController import check_if_user_exist, create_user_from_whatsapp
+from db.controller.messageLogController import log_message_exchange
 from utils.whatsapp import send_whatsapp_reply, send_whatsapp_image
 from utils.formatter import format_listings, get_listing_images
 from utils.translator import translate_reply
@@ -72,28 +73,37 @@ async def webhook(request: Request):
         print(f"MESSAGE: {message}")
         print(f"RESULT: {result}")
 
-        # replace the reply section with:
+        # reply section
         detected_lang = result.get("language", "en")
         if "data" in result:
             listings = result["data"]
             image_listings = get_listing_images(listings)
-            image_ids = {l[8] for l in listings if l[8]}
-
-            # text only for listings without images
             text_listings = [l for l in listings if not l[8]]
+
             if text_listings:
                 reply = format_listings(text_listings)
                 reply = translate_reply(reply, detected_lang)
                 send_whatsapp_reply(chat_id, reply)
 
-            # image listings sent as image + caption
             for image_url, caption in image_listings:
                 caption = translate_reply(caption, detected_lang)
                 send_whatsapp_image(chat_id, image_url, caption=caption)
+
+            full_reply = format_listings(listings)
         else:
             reply = result.get("message", "Done")
             reply = translate_reply(reply, detected_lang)
             send_whatsapp_reply(chat_id, reply)
+            full_reply = reply
+
+        # log the exchange
+        log_message_exchange(
+            user_id=str(user_id),
+            incoming=message,
+            outgoing=full_reply,
+            intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"),
+                                                                                   dict) else "unknown"
+        )
 
         return {"status": "received", "response": result}
 

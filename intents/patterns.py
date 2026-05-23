@@ -17,17 +17,20 @@ INTENT_PATTERNS = {
 
     "update_listing": {
         "keywords": [
-            "update listing",
-            "change price",
-            "edit listing",
-            "modify product"
+            "update",
+            "change",
+            "edit",
+            "modify",
         ],
         "examples": [
             "update my maize price to 150 xaf",
             "change the quantity of my tomatoes",
             "i want to edit my cassava listing",
             "modify the price of my onion bags",
-            "help me update my product information"
+            "help me update my product information",
+            "update my corn listing with this image",
+            "add an image to my cassava listing",
+            "change the image of my maize listing",
         ]
     },
 
@@ -42,6 +45,9 @@ INTENT_PATTERNS = {
             "show me all listings",
             "show me all products",
             "show all available listings",
+            "can i see all available products",
+            "show me all available products",
+            "what products are available",
         ]
     },
 

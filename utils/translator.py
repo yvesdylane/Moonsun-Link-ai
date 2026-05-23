@@ -1,31 +1,26 @@
-from langdetect import detect
+from langdetect import detect, DetectorFactory
 from deep_translator import GoogleTranslator
 
+# makes detection consistent/reproducible
+DetectorFactory.seed = 0
 
 def translate_to_english(text: str) -> tuple[str, str]:
-    """
-    Returns (translated_text, detected_language)
-    If already English, returns original text unchanged.
-    """
     try:
         lang = detect(text)
+        # if not english or french, default to english
+        if lang not in ("en", "fr"):
+            lang = "en"
         if lang == "en":
             return text, "en"
-
-        translated = GoogleTranslator(source="auto", target="en").translate(text)
-        return translated, lang
+        translated = GoogleTranslator(source="fr", target="en").translate(text)
+        return translated, "fr"
     except Exception:
-        # if detection fails, just return original
-        return text, "unknown"
+        return text, "en"
 
 def translate_reply(text: str, target_lang: str) -> str:
-    """
-    Translates bot reply to target language.
-    If target is English, returns as is.
-    """
     try:
-        if target_lang == "en" or target_lang == "unknown":
+        if target_lang != "fr":
             return text
-        return GoogleTranslator(source="en", target=target_lang).translate(text)
+        return GoogleTranslator(source="en", target="fr").translate(text)
     except Exception:
         return text
