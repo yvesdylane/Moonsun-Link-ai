@@ -47,14 +47,24 @@ def check_if_user_exist_by_telegram(telegram_id: str):
         return True, user[0]
     return False, None
 
-def create_user_from_telegram(telegram_id: str, name: str) -> str:
+def create_user_from_telegram(telegram_id: str, name: str, phone: str = None, region: str = "General") -> str:
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO users (name, telegram_id, role, region, lang)
-        VALUES (%s, %s, 'farmer', 'General', 'en')
+        INSERT INTO users (name, telegram_id, phone, role, region, lang)
+        VALUES (%s, %s, %s, 'farmer', %s, 'en')
         RETURNING id
-    """, (name, telegram_id))
+    """, (name, telegram_id, phone, region))
     user_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     return user_id
+
+def link_telegram_to_account(phone: str, telegram_id: str) -> dict:
+    user = get_user_by_phone(phone)
+    if not user:
+        return {"status": "error", "message": "No account found"}
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET telegram_id = %s WHERE id = %s", (telegram_id, user[0]))
+    conn.commit()
+    cur.close()
+    return {"status": "ok", "name": user[2]}
