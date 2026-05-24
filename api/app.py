@@ -9,10 +9,18 @@ from utils.translator import translate_reply
 from utils.transcriber import transcribe_audio
 from utils.audio_downloader import download_voice_note, download_attachment
 from utils.cloudinary_uploader import upload_image
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import asyncio
 import os
 
 app = FastAPI()
 router = ToolRouter()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# build telegram app once at startup
+telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
 class MessageRequest(BaseModel):
     message: str
@@ -120,3 +128,22 @@ async def webhook(request: Request):
 def chat(request: MessageRequest):
     result = router.handle(request.message)
     return result
+
+@app.on_event("startup")
+async def startup():
+    from api.telegram_bot import setup_handlers
+    setup_handlers(telegram_app)
+    await telegram_app.initialize()
+    await telegram_app.start()
+    print("Telegram bot ready via webhook")
+
+@app.on_event("shutdown")
+async def shutdown():
+    await telegram_app.stop()
+
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return {"status": "ok"}
