@@ -33,3 +33,28 @@ def get_user_role(user_id: str) -> str | None:
     result = cur.fetchone()
     cur.close()
     return result[0] if result else None
+
+def get_user_by_telegram(telegram_id: str):
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+    user = cur.fetchone()
+    cur.close()
+    return user
+
+def check_if_user_exist_by_telegram(telegram_id: str):
+    user = get_user_by_telegram(telegram_id)
+    if user:
+        return True, user[0]
+    return False, None
+
+def create_user_from_telegram(telegram_id: str, name: str) -> str:
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO users (name, telegram_id, role, region, lang)
+        VALUES (%s, %s, 'farmer', 'General', 'en')
+        RETURNING id
+    """, (name, telegram_id))
+    user_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    return user_id
