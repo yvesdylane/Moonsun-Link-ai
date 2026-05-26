@@ -58,7 +58,7 @@ def update_listing(listing_id: int, user_id: str, updates: dict):
         return {"status": "error", "message": "Listing not found or not yours"}
     return {"status": "ok", "message": "Listing updated successfully"}
 
-def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_price=None, user_id=None):
+def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_price=None, user_id=None, include_unverified=False):
     crop_id = get_crop_id(crop_name) if crop_name else None
 
     filters = []
@@ -79,6 +79,10 @@ def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_p
     if user_id:
         filters.append("l.user_id = %s")
         values.append(user_id)
+    else:
+        # Only show verified farmers' listings in public search
+        if not include_unverified:
+            filters.append("u.verified = true")
 
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
     offset = (page - 1) * limit
@@ -86,7 +90,13 @@ def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_p
     cur = conn.cursor()
 
     # get total count
-    cur.execute(f"SELECT COUNT(*) FROM listings l {where}", values)
+    cur.execute(f"""
+        SELECT COUNT(*) 
+        FROM listings l
+        JOIN crops c ON l.crop_id = c.id
+        JOIN users u ON l.user_id = u.id
+        {where}
+    """, values)
     total = cur.fetchone()[0]
 
     # get page

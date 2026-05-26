@@ -20,7 +20,7 @@ INTENT_PATTERNS = {
             "update",
             "change",
             "edit",
-            "modify",
+            "modify", "listing",
         ],
         "examples": [
             "update my maize price to 150 xaf",
@@ -93,6 +93,77 @@ INTENT_PATTERNS = {
             "good morning",
             "hey what's up",
             "hi I need help",
+        ]
+    },
+
+    "get_my_info": {
+        "keywords": [
+            "my info",
+            "my profile",
+            "my account",
+            "show my info",
+            "account details"
+        ],
+        "examples": [
+            "show me my account information",
+            "what's my profile",
+            "display my account details",
+            "view my info",
+            "show my profile"
+        ]
+    },
+
+    "verify_account": {
+        "keywords": [
+            "verify",
+            "verification",
+            "verify my account",
+            "get verified",
+            "verify me"
+        ],
+        "examples": [
+            "how do I verify my account",
+            "I want to get verified",
+            "verify my account",
+            "start verification process",
+            "how to verify"
+        ]
+    },
+
+    "change_role": {
+        "keywords": [
+            "become farmer",
+            "change role",
+            "switch to farmer",
+            "upgrade to farmer",
+            "make me farmer",
+            "farmer account"
+        ],
+        "examples": [
+            "I want to become a farmer",
+            "change my role to farmer",
+            "switch to farmer account in Littoral",
+            "upgrade my account to farmer in West",
+            "make me a farmer in Center",
+            "I want to be a farmer",
+            "upgrade to farmer account"
+        ]
+    },
+
+    "update_profile": {
+        "keywords": [
+            "update profile",
+            "change my name",
+            "update my info",
+            "modify profile",
+            "change region"
+        ],
+        "examples": [
+            "update my profile name",
+            "change my region to Center",
+            "modify my account information",
+            "update my name to John",
+            "change my region"
         ]
     },
 }

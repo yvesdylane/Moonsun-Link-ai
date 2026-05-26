@@ -32,6 +32,16 @@ class ToolRouter:
                 result["language"] = state["context"].get("language", "en")
                 return result
 
+        if state and state["state"] == "awaiting_verification_selfie":
+            result = self._handle_verification_selfie(user_id, image_url)
+            result["language"] = "en"
+            return result
+
+        if state and state["state"] == "awaiting_verification_id":
+            result = self._handle_verification_id(user_id, image_url)
+            result["language"] = "en"
+            return result
+
         pipeline_result = self.pipeline.process(text)
         intent = pipeline_result["intent"]["intent"]
         entities = pipeline_result["entities"]
@@ -44,6 +54,10 @@ class ToolRouter:
             "delete_listing": self._delete_listing,
             "update_listing": self._update_listing,
             "greeting": self._greeting,
+            "get_my_info": self._get_my_info,
+            "verify_account": self._verify_account,
+            "change_role": self._change_role,
+            "update_profile": self._update_profile,
         }
 
         handler = routes.get(intent, self._unknown)
@@ -52,6 +66,23 @@ class ToolRouter:
         return result
 
     def _greeting(self, entities, user_id, image_url=None):
+        from db.controller.userController import get_user_info
+
+        user = get_user_info(user_id)
+
+        if user and user.is_buyer():
+            return {
+                "status": "ok",
+                "message": (
+                    "👋 Hello! Welcome to Moonso Link.\n\n"
+                    "Here's what I can help you with:\n"
+                    "🔍 *Find products* — 'Find tomatoes in Douala'\n"
+                    "👤 *View profile* — 'Show my info'\n"
+                    "🌾 *Become a farmer* — 'Change my role to farmer in [Region]'\n\n"
+                    "Just send a message or voice note 🎙️"
+                )
+            }
+
         return {
             "status": "ok",
             "message": (
@@ -61,15 +92,29 @@ class ToolRouter:
                 "🔍 *Find products* — 'Find tomatoes in Douala'\n"
                 "📋 *My listings* — 'Show me my listings'\n"
                 "🗑️ *Delete listing* — 'Delete my corn listing'\n"
-                "✏️ *Update listing* — 'Update my corn price to 300 XAF'\n\n"
+                "✏️ *Update listing* — 'Update my corn price to 300 XAF'\n"
+                "👤 *View profile* — 'Show my info'\n"
+                "✅ *Get verified* — 'Verify my account'\n\n"
                 "Just send a message or voice note 🎙️"
             )
         }
 
     def _create_listing(self, entities, user_id, image_url=None):
-        role = get_user_role(user_id)
-        if role != "farmer":
-            return {"status": "error", "message": "Only farmers can create listings"}
+        from db.controller.userController import get_user_info
+
+        user = get_user_info(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        if not user.is_farmer():
+            return {"status": "error", "message": "Only farmers can create listings. To become a farmer, send: 'change my role to farmer in [your region]'"}
+
+        if not user.is_verified():
+            return {
+                "status": "error",
+                "message": "⚠️ Only verified farmers can create listings.\n\nYour listings won't be visible to buyers until you verify your account.\n\nTo verify, send: 'verify my account'"
+            }
+
         if not entities.get("product"):
             return {"status": "error", "message": "What crop do you want to sell?"}
         if not entities.get("quantity"):
@@ -107,7 +152,7 @@ class ToolRouter:
         return {"status": "ok", "data": result, "show_seller": True}
 
     def _get_my_listings(self, entities, user_id, image_url=None):
-        filters = {"crop_name": entities.get("product"), "user_id": user_id}
+        filters = {"crop_name": entities.get("product"), "user_id": user_id, "include_unverified": True}
         result = get_listings(page=1, **filters)
         if result["total_pages"] > 1:
             set_state(user_id, "browsing_listings", {
@@ -223,6 +268,42 @@ class ToolRouter:
         except ValueError:
             return {"status": "error", "message": f"Please reply with a number between 1 and {len(listings)}"}
 
+    def _handle_verification_selfie(self, user_id: str, image_url: str) -> dict:
+        if not image_url:
+            return {
+                "status": "error",
+                "message": "Please send a photo of yourself (selfie). Accepted formats: JPEG, PNG, PDF (max 2MB)"
+            }
+
+        # Store selfie URL in state context
+        set_state(user_id, "awaiting_verification_id", {"selfie_url": image_url})
+
+        return {
+            "status": "ok",
+            "message": "✅ Selfie received!\n\nStep 2 of 2: Send a photo of your ID card\n\nAccepted formats: JPEG, PNG, PDF\nMax size: 2MB"
+        }
+
+    def _handle_verification_id(self, user_id: str, image_url: str) -> dict:
+        from db.controller.userController import submit_verification_files
+
+        state = get_state(user_id)
+        if not state or "selfie_url" not in state["context"]:
+            clear_state(user_id)
+            return {"status": "error", "message": "Verification session expired. Please start again by sending 'verify my account'"}
+
+        if not image_url:
+            return {
+                "status": "error",
+                "message": "Please send a photo of your ID card. Accepted formats: JPEG, PNG, PDF (max 2MB)"
+            }
+
+        selfie_url = state["context"]["selfie_url"]
+        clear_state(user_id)
+
+        # Submit both files for verification
+        result = submit_verification_files(user_id, selfie_url, image_url)
+        return result
+
     def _listing_preview(self, listing_id: int, user_id: str) -> dict:
         result = get_listings(page=1, limit=1, user_id=user_id)
         # find the specific listing by id
@@ -234,6 +315,91 @@ class ToolRouter:
                 "preview_image": listing[8],
             }
         return {"status": "ok", "message": "✅ Listing updated successfully"}
+
+    def _get_my_info(self, entities, user_id, image_url=None):
+        from db.controller.userController import get_user_info
+
+        user = get_user_info(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        info = (
+            f"👤 *Your Profile*\n\n"
+            f"Name: {user.name}\n"
+            f"Phone: {user.phone or 'Not set'}\n"
+            f"Role: {user.role.capitalize()}\n"
+            f"Region: {user.region}\n"
+            f"Language: {user.get_lang_display()}\n"
+            f"Status: {user.get_verification_status_display()}\n"
+        )
+
+        if user.is_farmer() and not user.is_verified():
+            info += f"\n⚠️ To make your listings visible, send: 'verify my account'"
+
+        return {"status": "ok", "message": info}
+
+    def _verify_account(self, entities, user_id, image_url=None):
+        from db.controller.userController import get_user_info, check_verification_status
+
+        user = get_user_info(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        if not user.is_farmer():
+            return {
+                "status": "error",
+                "message": "Verification is only required for farmers. To become a farmer, send: 'change my role to farmer in [your region]'"
+            }
+
+        # Check current verification status
+        status_result = check_verification_status(user_id)
+
+        if user.is_verified():
+            return status_result
+
+        # Start verification process
+        set_state(user_id, "awaiting_verification_selfie", {})
+        return {
+            "status": "ok",
+            "message": "📸 *Verification Process*\n\nStep 1 of 2: Send a clear photo of yourself (selfie)\n\nAccepted formats: JPEG, PNG, PDF\nMax size: 2MB"
+        }
+
+    def _change_role(self, entities, user_id, image_url=None):
+        from db.controller.userController import change_role_to_farmer, get_user_info
+
+        user = get_user_info(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        if user.is_farmer():
+            return {"status": "error", "message": "You are already a farmer. To change your region, send: 'update my region to [region name]'"}
+
+        region = entities.get("region")
+        if not region:
+            return {
+                "status": "error",
+                "message": "Please specify your primary region of activity.\n\nExample: 'change my role to farmer in Littoral'\n\nAvailable regions: Littoral, Centre, Ouest, Nord, Sud, etc."
+            }
+
+        return change_role_to_farmer(user_id, region)
+
+    def _update_profile(self, entities, user_id, image_url=None):
+        from db.controller.userController import update_user_info
+
+        updates = {}
+
+        if entities.get("name"):
+            updates["name"] = entities.get("name")
+        if entities.get("region"):
+            updates["region"] = entities.get("region")
+
+        if not updates:
+            return {
+                "status": "error",
+                "message": "What would you like to update?\n\nYou can update:\n- Your name\n- Your region"
+            }
+
+        return update_user_info(user_id, updates)
 
     def _unknown(self, entities, user_id, image_url=None):
         return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}

@@ -12,8 +12,7 @@ import tempfile
 
 router = ToolRouter()
 LOGO_PATH = Path("Assets/logo.jpg")
-MARKET_URL = "https://placeholder.moonso.app"  # replace when ready
-
+MARKET_URL = "https://placeholder.moonso.app"  # replace when ready`
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
