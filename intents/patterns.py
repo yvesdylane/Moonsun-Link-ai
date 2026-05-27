@@ -249,4 +249,27 @@ INTENT_PATTERNS = {
             "corn at 400 XAF per kg"
         ]
     },
+
+    "view_listing_image": {
+        "keywords": [
+            "show image",
+            "show photo",
+            "view image",
+            "see image",
+            "see photo",
+            "listing image",
+            "listing photo",
+            "view picture",
+            "show picture",
+            "display image"
+        ],
+        "examples": [
+            "show me the image of listing 2",
+            "view photo of listing 1",
+            "see image of listing 3",
+            "show image of listing #5",
+            "display photo of listing 4",
+            "what does listing 2 look like"
+        ]
+    },
 }

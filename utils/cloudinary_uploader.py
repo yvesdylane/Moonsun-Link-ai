@@ -1,7 +1,9 @@
 import cloudinary
 import cloudinary.uploader
 import os
+import tempfile
 from dotenv import load_dotenv
+from utils.image_compressor import compress_image
 
 load_dotenv()
 
@@ -12,9 +14,14 @@ cloudinary.config(
 )
 
 def upload_image(file_path: str) -> str | None:
-    print(f"CLOUD NAME: '{os.getenv('CLOUDINARY_CLOUD_NAME')}'")
     try:
-        result = cloudinary.uploader.upload(file_path, folder="moonso/listings")
+        compressed = compress_image(file_path)
+        suffix = os.path.splitext(file_path)[1] or ".jpg"
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.write(compressed)
+        tmp.close()
+        result = cloudinary.uploader.upload(tmp.name, folder="moonso/listings")
+        os.unlink(tmp.name)
         return result["secure_url"]
     except Exception as e:
         print(f"CLOUDINARY ERROR: {e}")

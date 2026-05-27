@@ -4,7 +4,7 @@ from tools.router import ToolRouter
 from db.controller.userController import check_if_user_exist, create_user_from_whatsapp
 from db.controller.messageLogController import log_message_exchange
 from utils.whatsapp import send_whatsapp_reply, send_whatsapp_image
-from utils.formatter import format_listings, get_listing_images
+from utils.formatter import format_listings
 from utils.translator import translate_reply
 from utils.transcriber import transcribe_audio
 from utils.audio_downloader import download_voice_note, download_attachment
@@ -13,6 +13,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import asyncio
 import os
+import traceback
 
 app = FastAPI()
 router = ToolRouter()
@@ -32,106 +33,118 @@ def home():
 
 @app.post("/whatsapp")
 async def webhook(request: Request):
-    data = await request.json()
-    print(data)
-    if data["event"] == "message_received":
-        if data.get("is_sender"):
-            return {"status": "ignored"}
+    chat_id = None
+    try:
+        data = await request.json()
+        print(data)
+        if data.get("event") != "message_received":
+            return {"status": "received"}
+        chat_id = data.get("chat_id")
+        return await _handle_webhook(data)
+    except Exception as e:
+        print("=" * 60)
+        print(f"UNHANDLED ERROR IN WHATSAPP WEBHOOK: {e}")
+        traceback.print_exc()
+        print("=" * 60)
+        if chat_id:
+            send_whatsapp_reply(chat_id, "Sorry, an error occurred on our side. Please try again later.")
+        return {"status": "error"}
 
-        phone = data["sender"]["attendee_specifics"]["phone_number"]
-        name = data["sender"]["attendee_name"]
-        chat_id = data["chat_id"]
+async def _handle_webhook(data: dict):
+    if data.get("is_sender"):
+        return {"status": "ignored"}
 
-        # get message text
-        message = data.get("message")
-        message_id = data.get("message_id")
-        print(f"EVENT message_id={message_id} is_sender={data.get('is_sender')}")
+    phone = data["sender"]["attendee_specifics"]["phone_number"]
+    name = data["sender"]["attendee_name"]
+    chat_id = data["chat_id"]
 
-        # handle voice note
-        image_url = None
-        attachments = data.get("attachments", [])
+    # get message text
+    message = data.get("message")
+    message_id = data.get("message_id")
+    print(f"EVENT message_id={message_id} is_sender={data.get('is_sender')}")
 
-        voice = next((a for a in attachments if a.get("voice_note")), None)
-        image = next((a for a in attachments if a.get("attachment_type") in ("file", "img")), None)
+    # handle voice note
+    image_url = None
+    attachments = data.get("attachments", [])
 
-        # handle voice
-        if not message and voice:
+    voice = next((a for a in attachments if a.get("voice_note")), None)
+    image = next((a for a in attachments if a.get("attachment_type") in ("file", "img")), None)
+
+    # handle voice
+    if not message and voice:
+        try:
             file_path = download_attachment(voice["attachment_id"], data["message_id"], suffix=".ogg")
             message = transcribe_audio(file_path)
             os.unlink(file_path)
             print(f"TRANSCRIBED: {message}")
+        except Exception as e:
+            print(f"VOICE PROCESSING ERROR: {e}")
+            traceback.print_exc()
+            send_whatsapp_reply(chat_id, "Sorry, could not process your voice message. Please try again.")
+            return {"status": "error", "detail": "voice_processing_failed"}
 
-        # handle image
-        if image:
+    # handle image
+    if image:
+        try:
             attachment_name = image.get("attachment_name", "image.jpg")
             suffix = "." + attachment_name.rsplit(".", 1)[-1]
             file_path = download_attachment(image["attachment_id"], data["message_id"], suffix=suffix)
             image_url = upload_image(file_path)
             os.unlink(file_path)
             print(f"IMAGE URL: {image_url}")
+        except Exception as e:
+            print(f"IMAGE PROCESSING ERROR: {e}")
+            traceback.print_exc()
 
-        if not message:
-            return {"status": "ignored"}
+    if not message:
+        return {"status": "ignored"}
 
-        exist, user_id = check_if_user_exist(phone)
-        if not exist:
-            user_id = create_user_from_whatsapp(phone, name)
+    exist, user_id = check_if_user_exist(phone)
+    if not exist:
+        user_id = create_user_from_whatsapp(phone, name)
 
-        result = router.handle(message, str(user_id), image_url=image_url)
-        print(f"MESSAGE: {message}")
-        print(f"RESULT: {result}")
+    result = router.handle(message, str(user_id), image_url=image_url)
+    print(f"MESSAGE: {message}")
+    print(f"RESULT: {result}")
 
-        # Handle seller notification for interests
-        if result.get("seller_notification"):
-            seller_notif = result["seller_notification"]
-            if seller_notif.get("seller_whatsapp") and seller_notif.get("message"):
-                # Try to send notification to seller
-                # Note: We need to find seller's chat_id
-                # For now, farmer can check interests via "view my listing interests"
-                pass
+    # Handle seller notification for interests
+    if result.get("seller_notification"):
+        seller_notif = result["seller_notification"]
+        if seller_notif.get("seller_whatsapp") and seller_notif.get("message"):
+            pass
 
-        # reply section
-        detected_lang = result.get("language", "en")
-        if result.get("preview_image"):
-            reply = result.get("message", "Done")
-            reply = translate_reply(reply, detected_lang)
-            send_whatsapp_image(chat_id, result["preview_image"], caption=reply)
-        elif "data" in result:
-            data = result["data"]
-            show_seller = result.get("show_seller", False)
-            listings = data["listings"]
-            image_listings = get_listing_images(data, show_seller=show_seller)
-            text_listings = [l for l in listings if not l[8]]
+    # reply section
+    detected_lang = result.get("language", "en")
+    full_reply = ""
 
-            if text_listings:
-                text_data = {**data, "listings": text_listings}
-                reply = format_listings(text_data, show_seller=show_seller)
-                reply = translate_reply(reply, detected_lang)
-                send_whatsapp_reply(chat_id, reply)
+    if result.get("preview_image"):
+        reply = result.get("message", "Done")
+        reply = translate_reply(reply, detected_lang)
+        send_whatsapp_image(chat_id, result["preview_image"], caption=reply)
+        full_reply = reply
+    elif "data" in result:
+        listings_data = result["data"]
+        show_seller = result.get("show_seller", False)
+        reply = format_listings(listings_data, show_seller=show_seller)
+        reply = translate_reply(reply, detected_lang)
+        send_whatsapp_reply(chat_id, reply)
+        full_reply = reply
+    else:
+        reply = result.get("message", "Done")
+        reply = translate_reply(reply, detected_lang)
+        send_whatsapp_reply(chat_id, reply)
+        full_reply = reply
 
-            for image_url, caption in image_listings:
-                caption = translate_reply(caption, detected_lang)
-                send_whatsapp_image(chat_id, image_url, caption=caption)
+    # log the exchange
+    log_message_exchange(
+        user_id=str(user_id),
+        incoming=message,
+        outgoing=full_reply,
+        intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"),
+                                                                               dict) else "unknown"
+    )
 
-            full_reply = format_listings(data, show_seller=show_seller)
-        else:
-            reply = result.get("message", "Done")
-            reply = translate_reply(reply, detected_lang)
-            send_whatsapp_reply(chat_id, reply)
-            full_reply = reply
-
-        # log the exchange
-        log_message_exchange(
-            user_id=str(user_id),
-            incoming=message,
-            outgoing=full_reply,
-            intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"),
-                                                                                   dict) else "unknown"
-        )
-
-        return {"status": "received", "response": result}
-
-    return {"status": "received"}
+    return {"status": "received", "response": result}
 
 @app.post("/chat")
 def chat(request: MessageRequest):

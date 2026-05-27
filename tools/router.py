@@ -1,3 +1,4 @@
+import traceback
 from core.pipeline import AssistantPipeline
 from db.controller.userController import get_user_role
 from db.controller.listingController import get_listings, create_listing, delete_listing, update_listing
@@ -10,37 +11,110 @@ class ToolRouter:
         self.pipeline = AssistantPipeline()
 
     def handle(self, text: str, user_id: str, image_url: str = None) -> dict:
+        try:
+            return self._handle_inner(text, user_id, image_url)
+        except Exception as e:
+            print("=" * 60)
+            print(f"UNHANDLED ERROR IN ROUTER: {e}")
+            traceback.print_exc()
+            print("=" * 60)
+            return {
+                "status": "error",
+                "message": "Sorry, an error occurred on our side. Please try again later."
+            }
+
+    def _check_new_intent(self, text: str):
+        pipeline_result = self.pipeline.process(text)
+        intent = pipeline_result["intent"]["intent"]
+        confidence = pipeline_result["intent"]["confidence"]
+        if intent not in ("unknown", "greeting") and confidence >= 0.5:
+            return pipeline_result
+        return None
+
+    def _handle_inner(self, text: str, user_id: str, image_url: str = None) -> dict:
         state = get_state(user_id)
 
-        if state and state["state"] == "awaiting_delete_choice":
-            result = self._handle_delete_choice(text, user_id, state["context"])
-            result["language"] = "en"
-            return result
+        if state:
+            new_pipeline = self._check_new_intent(text)
 
-        if state and state["state"] == "awaiting_update_choice":
-            result = self._handle_update_choice(text, user_id, state["context"])
-            result["language"] = "en"
-            return result
+            # ── awaiting_delete_choice ─────────────────────────────────
+            if state["state"] == "awaiting_delete_choice":
+                if text.strip().isdigit():
+                    result = self._handle_delete_choice(text, user_id, state["context"])
+                    result["language"] = "en"
+                    return result
+                if new_pipeline:
+                    clear_state(user_id)
+                else:
+                    context = state.get("context", {})
+                    listings = context.get("listings", [])
+                    return {
+                        "status": "error",
+                        "message": f"Please reply with a number between 1 and {len(listings)}"
+                    }
 
-        if state and state["state"] == "browsing_listings":
-            if text.strip().lower() in ("next", "suivant"):
-                result = self._browse_page(user_id, state["context"], direction=1)
-                result["language"] = state["context"].get("language", "en")
-                return result
-            elif text.strip().lower() in ("previous", "prev", "précédent", "retour"):
-                result = self._browse_page(user_id, state["context"], direction=-1)
-                result["language"] = state["context"].get("language", "en")
-                return result
+            # ── awaiting_update_choice ─────────────────────────────────
+            if state["state"] == "awaiting_update_choice":
+                if text.strip().isdigit():
+                    result = self._handle_update_choice(text, user_id, state["context"])
+                    result["language"] = "en"
+                    return result
+                if new_pipeline:
+                    clear_state(user_id)
+                else:
+                    context = state.get("context", {})
+                    listings = context.get("listings", [])
+                    return {
+                        "status": "error",
+                        "message": f"Please reply with a number between 1 and {len(listings)}"
+                    }
 
-        if state and state["state"] == "awaiting_verification_selfie":
-            result = self._handle_verification_selfie(user_id, image_url)
-            result["language"] = "en"
-            return result
+            # ── browsing_listings ──────────────────────────────────────
+            if state["state"] == "browsing_listings":
+                lower = text.strip().lower()
+                if lower in ("next", "suivant"):
+                    result = self._browse_page(user_id, state["context"], direction=1)
+                    result["language"] = state["context"].get("language", "en")
+                    return result
+                if lower in ("previous", "prev", "précédent", "retour"):
+                    result = self._browse_page(user_id, state["context"], direction=-1)
+                    result["language"] = state["context"].get("language", "en")
+                    return result
+                if new_pipeline:
+                    clear_state(user_id)
+                else:
+                    return {
+                        "status": "error",
+                        "message": "Reply 'next' or 'previous' to browse pages, or send a new request."
+                    }
 
-        if state and state["state"] == "awaiting_verification_id":
-            result = self._handle_verification_id(user_id, image_url)
-            result["language"] = "en"
-            return result
+            # ── awaiting_verification_selfie ──────────────────────────
+            if state["state"] == "awaiting_verification_selfie":
+                if image_url:
+                    result = self._handle_verification_selfie(user_id, image_url)
+                    result["language"] = "en"
+                    return result
+                if new_pipeline:
+                    clear_state(user_id)
+                else:
+                    return {
+                        "status": "error",
+                        "message": "📸 Please send a photo of yourself (selfie).\n\nJust send the image directly - no need to caption it.\n\nAccepted formats: JPEG, PNG, PDF (max 2MB)"
+                    }
+
+            # ── awaiting_verification_id ───────────────────────────────
+            if state["state"] == "awaiting_verification_id":
+                if image_url:
+                    result = self._handle_verification_id(user_id, image_url)
+                    result["language"] = "en"
+                    return result
+                if new_pipeline:
+                    clear_state(user_id)
+                else:
+                    return {
+                        "status": "error",
+                        "message": "🆔 Please send a photo of your ID card.\n\nJust send the image directly.\n\nAccepted formats: JPEG, PNG, PDF (max 2MB)"
+                    }
 
         pipeline_result = self.pipeline.process(text)
         intent = pipeline_result["intent"]["intent"]
@@ -63,6 +137,7 @@ class ToolRouter:
             "show_interest": self._show_interest,
             "view_listing_interests": self._view_listing_interests,
             "search_by_price": self._search_by_price,
+            "view_listing_image": self._view_listing_image,
         }
 
         handler = routes.get(intent, self._unknown)
@@ -749,6 +824,67 @@ class ToolRouter:
                     f"To see listings, send: 'Find {product}'"
                 )
             }
+
+    def _view_listing_image(self, entities, user_id, image_url=None):
+        from db.connect import conn
+
+        state = get_state(user_id)
+        if not state or "listing_ids" not in state.get("context", {}):
+            return {
+                "status": "error",
+                "message": "Please search for listings first.\n\nExample: 'Find corn in Douala'"
+            }
+
+        listing_ids = state["context"]["listing_ids"]
+        listing_number = entities.get("listing_number")
+
+        if not listing_number:
+            return {
+                "status": "error",
+                "message": "Which listing photo would you like to see?\n\nExample: 'show image of listing #2'"
+            }
+
+        try:
+            listing_index = int(listing_number) - 1
+            if listing_index < 0 or listing_index >= len(listing_ids):
+                return {
+                    "status": "error",
+                    "message": f"Invalid listing number. Please choose between 1 and {len(listing_ids)}."
+                }
+        except (ValueError, TypeError):
+            return {
+                "status": "error",
+                "message": "Please provide a valid listing number.\n\nExample: 'show image of listing #2'"
+            }
+
+        listing_id = listing_ids[listing_index]
+
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT l.image_url, c.name
+            FROM listings l
+            JOIN crops c ON l.crop_id = c.id
+            WHERE l.id = %s
+        """, (listing_id,))
+        row = cur.fetchone()
+        cur.close()
+
+        if not row:
+            return {"status": "error", "message": "Listing not found."}
+
+        image = row[0]
+        if not image:
+            return {
+                "status": "ok",
+                "message": f"No photo available for listing #{listing_number}."
+            }
+
+        crop_name = row[1].capitalize()
+        return {
+            "status": "ok",
+            "message": f"📸 #{listing_number} {crop_name}",
+            "preview_image": image
+        }
 
     def _unknown(self, entities, user_id, image_url=None):
         return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}

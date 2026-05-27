@@ -58,12 +58,15 @@ def update_listing(listing_id: int, user_id: str, updates: dict):
         return {"status": "error", "message": "Listing not found or not yours"}
     return {"status": "ok", "message": "Listing updated successfully"}
 
-def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_price=None, user_id=None, include_unverified=False):
+def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_price=None, user_id=None, include_unverified=False, listing_id=None):
     crop_id = get_crop_id(crop_name) if crop_name else None
 
     filters = []
     values = []
 
+    if listing_id:
+        filters.append("l.id = %s")
+        values.append(listing_id)
     if crop_id:
         filters.append("l.crop_id = %s")
         values.append(crop_id)

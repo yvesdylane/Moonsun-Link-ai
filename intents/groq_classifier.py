@@ -36,7 +36,8 @@ Available intents:
 13. show_interest - User expresses interest in a specific listing number
 14. view_listing_interests - Farmer wants to see buyer interests on their listings
 15. search_by_price - User searches for product at specific price
-16. unknown - None of the above match
+16. view_listing_image - User wants to see the photo/image of a specific listing number
+17. unknown - None of the above match
 
 Extract entities:
 - product: crop name (maize, cassava, tomato, onion, plantain, yam, etc.)
@@ -74,7 +75,8 @@ Rules:
 - For "search_listings", user specifies criteria (location, price, etc.) - differs from product_locations which asks general availability
 - For "show_interest", extract listing_number from: "listing 5", "number 3", "#2", "the 4th one"
 - For "search_by_price", user asks if anyone is selling product at specific price
-- For "view_listing_interests", farmer asks to see buyer interests"""
+- For "view_listing_interests", farmer asks to see buyer interests
+- For "view_listing_image", user asks to see photo/image of listing number; extract listing_number from: "listing 5", "#3", "number 2", "the 4th one\""""
 
         try:
             response = self.client.chat.completions.create(

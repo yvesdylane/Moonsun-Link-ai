@@ -52,6 +52,11 @@ def format_listings(result: dict, show_seller: bool = False) -> str:
     if show_seller and listings:
         lines.append(f"\n💡 To show interest, send: 'I'm interested in [quantity]kg of listing #[number]'")
 
+    # Check if any listing has an image
+    has_images = any(l[8] for l in listings)
+    if has_images:
+        lines.append(f"\n📸 To see photos, send: 'show image of listing #[number]'")
+
     return "\n\n".join(lines)
 
 def get_listing_images(result: dict, show_seller: bool = False) -> list:

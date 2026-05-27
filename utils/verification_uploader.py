@@ -1,7 +1,9 @@
 import cloudinary
 import cloudinary.uploader
 import os
+import tempfile
 from dotenv import load_dotenv
+from utils.image_compressor import compress_image
 
 load_dotenv()
 
@@ -44,17 +46,31 @@ def upload_verification_file(file_path: str, user_id: str, file_type: str) -> di
         }
 
     try:
+        # Compress image (skip PDFs)
+        if ext != '.pdf':
+            compressed = compress_image(file_path)
+            tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+            tmp.write(compressed)
+            tmp.close()
+            upload_path = tmp.name
+        else:
+            upload_path = file_path
+
         # Upload to Cloudinary in user-specific folder
         folder = f"moonso/users/{user_id}"
         public_id = f"{file_type}_{user_id}"
 
         result = cloudinary.uploader.upload(
-            file_path,
+            upload_path,
             folder=folder,
             public_id=public_id,
             resource_type="auto",  # Handles images and PDFs
             overwrite=True
         )
+
+        # Clean up temp file if created
+        if ext != '.pdf':
+            os.unlink(upload_path)
 
         return {
             "status": "ok",

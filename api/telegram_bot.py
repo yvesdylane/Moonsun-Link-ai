@@ -1,10 +1,11 @@
 import os
+import traceback
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, CommandHandler, filters, ContextTypes
 from tools.router import ToolRouter
 from db.controller.userController import check_if_user_exist_by_telegram, create_user_from_telegram
-from utils.formatter import format_listings, get_listing_images
+from utils.formatter import format_listings
 from utils.translator import translate_reply
 from utils.transcriber import transcribe_audio
 from utils.audio_downloader import download_attachment
@@ -55,6 +56,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await _handle_callback_inner(update, context)
+    except Exception as e:
+        print("=" * 60)
+        print(f"UNHANDLED ERROR IN TELEGRAM CALLBACK: {e}")
+        traceback.print_exc()
+        print("=" * 60)
+        try:
+            await update.callback_query.message.reply_text(
+                "Sorry, an error occurred on our side. Please try again later."
+            )
+        except Exception:
+            pass
+
+async def _handle_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -93,6 +109,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await _handle_message_inner(update, context)
+    except Exception as e:
+        print("=" * 60)
+        print(f"UNHANDLED ERROR IN TELEGRAM HANDLER: {e}")
+        traceback.print_exc()
+        print("=" * 60)
+        await update.message.reply_text("Sorry, an error occurred on our side. Please try again later.")
+
+async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = str(user.id)
     name = user.full_name
@@ -117,9 +143,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Ouest", callback_data="region_Ouest"),
              InlineKeyboardButton("Est", callback_data="region_Est")],
             [InlineKeyboardButton("Nord-Ouest", callback_data="region_Nord-Ouest"),
-             InlineKeyboardButton("Sud-Ouest", callback_data="region_Sud-Ouest")],
+              InlineKeyboardButton("Sud-Ouest", callback_data="region_Sud-Ouest")],
             [InlineKeyboardButton("Adamaoua", callback_data="region_Adamaoua"),
-             InlineKeyboardButton("Extreme-Nord", callback_data="region_Extreme-Nord")],
+              InlineKeyboardButton("Extreme-Nord", callback_data="region_Extreme-Nord")],
         ])
         await update.message.reply_text("Which region are you from?", reply_markup=keyboard)
         return
@@ -148,6 +174,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_telegram_reply(update, result)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await _handle_voice_inner(update, context)
+    except Exception as e:
+        print("=" * 60)
+        print(f"UNHANDLED ERROR IN TELEGRAM VOICE HANDLER: {e}")
+        traceback.print_exc()
+        print("=" * 60)
+        await update.message.reply_text("Sorry, an error occurred on our side. Please try again later.")
+
+async def _handle_voice_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = str(user.id)
     state = context.user_data.get("state")
@@ -168,6 +204,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         message = transcribe_audio(tmp.name)
         print(f"TELEGRAM TRANSCRIBED: {message}")
+    except Exception as e:
+        print(f"TELEGRAM VOICE TRANSCRIPTION ERROR: {e}")
+        traceback.print_exc()
+        await update.message.reply_text("Sorry, could not process your voice message. Please try again.")
+        return
     finally:
         os.unlink(tmp.name)
 
@@ -188,25 +229,16 @@ async def send_telegram_reply(update: Update, result: dict):
     elif "data" in result:
         data = result["data"]
         show_seller = result.get("show_seller", False)
-        listings = data["listings"]
-        text_listings = [l for l in listings if not l[8]]
-        image_listings = get_listing_images(data, show_seller=show_seller)
-
-        if text_listings:
-            reply = format_listings({**data, "listings": text_listings}, show_seller=show_seller)
-            reply = translate_reply(reply, detected_lang)
-            keyboard = []
-            if data["page"] > 1:
-                keyboard.append(InlineKeyboardButton("◀ Previous", callback_data="prev"))
-            if data["page"] < data["total_pages"]:
-                keyboard.append(InlineKeyboardButton("Next ▶", callback_data="next"))
-            keyboard_rows = [keyboard] if keyboard else []
-            keyboard_rows.append([InlineKeyboardButton("🛒 Open Marketplace", web_app={"url": MARKET_URL})])
-            await update.message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard_rows))
-
-        for image_url, caption in image_listings:
-            caption = translate_reply(caption, detected_lang)
-            await update.message.reply_photo(photo=image_url, caption=caption)
+        reply = format_listings(data, show_seller=show_seller)
+        reply = translate_reply(reply, detected_lang)
+        keyboard = []
+        if data["page"] > 1:
+            keyboard.append(InlineKeyboardButton("◀ Previous", callback_data="prev"))
+        if data["page"] < data["total_pages"]:
+            keyboard.append(InlineKeyboardButton("Next ▶", callback_data="next"))
+        keyboard_rows = [keyboard] if keyboard else []
+        keyboard_rows.append([InlineKeyboardButton("🛒 Open Marketplace", web_app={"url": MARKET_URL})])
+        await update.message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard_rows))
 
     else:
         reply = translate_reply(result.get("message", "Done"), detected_lang)
