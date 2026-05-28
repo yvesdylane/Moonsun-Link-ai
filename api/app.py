@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 from tools.router import ToolRouter
 from db.controller.userController import check_if_user_exist, create_user_from_whatsapp
 from db.controller.messageLogController import log_message_exchange
@@ -15,7 +16,23 @@ import asyncio
 import os
 import traceback
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan - startup and shutdown."""
+    # Startup: Open async database pool
+    from db.connect import async_pool
+    await async_pool.open()
+    print("✅ Async database pool opened")
+
+    yield
+
+    # Shutdown: Close async database pool
+    await async_pool.close()
+    print("✅ Async database pool closed")
+
+
+app = FastAPI(lifespan=lifespan)
 router = ToolRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")

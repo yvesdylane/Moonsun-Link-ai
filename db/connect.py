@@ -1,71 +1,90 @@
 import os
 from dotenv import load_dotenv
-from psycopg_pool import ConnectionPool
-from contextlib import contextmanager
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from contextlib import asynccontextmanager, contextmanager
 
 load_dotenv()
 
-# Create connection pool
-# min_size: minimum connections kept alive
-# max_size: maximum connections that can be created
-# timeout: time to wait for connection before raising error
-pool = ConnectionPool(
-    conninfo=(
-        f"host={os.getenv('DB_HOST')} "
-        f"dbname={os.getenv('DB_NAME')} "
-        f"user={os.getenv('DB_USER')} "
-        f"password={os.getenv('DB_PASSWORD')} "
-        f"port={os.getenv('DB_PORT')}"
-    ),
-    min_size=2,      # Keep 2 connections always ready
-    max_size=10,     # Maximum 10 concurrent connections
-    timeout=30,      # Wait up to 30s for connection
-    open=True        # Open pool immediately
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST"),
+    "dbname": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "port": os.getenv("DB_PORT")
+}
+
+CONNINFO = " ".join([f"{k}={v}" for k, v in DB_CONFIG.items()])
+
+# Async connection pool (preferred for new code)
+# Don't open in constructor - will be opened by FastAPI lifespan
+async_pool = AsyncConnectionPool(
+    conninfo=CONNINFO,
+    min_size=2,
+    max_size=20,
+    timeout=30
 )
 
-print(f"✅ Database connection pool created (min=2, max=10)")
+# Sync connection pool (for legacy code during migration)
+sync_pool = ConnectionPool(
+    conninfo=CONNINFO,
+    min_size=2,
+    max_size=10,
+    timeout=30,
+    open=True  # Sync pool can open immediately
+)
+
+print(f"✅ Database pools initialized")
+print(f"   - Async pool (min=2, max=20) - will open on app startup")
+print(f"   - Sync pool (min=2, max=10) - ready")
+
+
+@asynccontextmanager
+async def get_async_connection():
+    """
+    Get an async connection from the pool.
+
+    Usage:
+        async with get_async_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT ...")
+                result = await cur.fetchone()
+            await conn.commit()
+    """
+    async with async_pool.connection() as conn:
+        yield conn
 
 
 @contextmanager
-def get_connection():
+def get_sync_connection():
     """
-    Get a connection from the pool.
+    Get a sync connection from the pool (legacy support).
 
-    Usage with context manager (recommended):
-        with get_connection() as conn:
+    Usage:
+        with get_sync_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT ...")
+            result = cur.fetchone()
             conn.commit()
-
-    The connection is automatically returned to the pool when exiting context.
     """
-    conn = pool.getconn()
-    try:
+    with sync_pool.connection() as conn:
         yield conn
-    finally:
-        pool.putconn(conn)
 
 
-# Legacy support: conn object for existing code
-# This maintains backward compatibility with existing non-context-manager code
+# Legacy conn object for backward compatibility
 class LegacyConnectionWrapper:
     """
-    Wrapper to maintain backward compatibility with existing code.
+    Synchronous connection wrapper for existing code.
 
-    Gets a connection from pool for each operation.
-    Properly returns connection after commit/rollback.
-
-    WARNING: Less efficient than context managers.
-    Migrate to get_connection() context manager for new code.
+    This maintains backward compatibility during migration.
+    Uses sync_pool under the hood.
     """
 
     def __init__(self):
         self._current_conn = None
 
     def cursor(self, *args, **kwargs):
-        # Get fresh connection from pool if we don't have one
         if self._current_conn is None:
-            self._current_conn = pool.getconn()
+            self._current_conn = sync_pool.getconn()
         return self._current_conn.cursor(*args, **kwargs)
 
     def commit(self):
@@ -73,8 +92,7 @@ class LegacyConnectionWrapper:
             try:
                 self._current_conn.commit()
             finally:
-                # Return connection to pool
-                pool.putconn(self._current_conn)
+                sync_pool.putconn(self._current_conn)
                 self._current_conn = None
 
     def rollback(self):
@@ -82,26 +100,22 @@ class LegacyConnectionWrapper:
             try:
                 self._current_conn.rollback()
             finally:
-                # Return connection to pool
-                pool.putconn(self._current_conn)
+                sync_pool.putconn(self._current_conn)
                 self._current_conn = None
 
     def close(self):
-        # Return connection to pool if we have one
         if self._current_conn:
-            pool.putconn(self._current_conn)
+            sync_pool.putconn(self._current_conn)
             self._current_conn = None
 
     def __getattr__(self, name):
-        # Forward any other attributes to current connection
         if self._current_conn:
             return getattr(self._current_conn, name)
-        # Get a connection if we don't have one
-        self._current_conn = pool.getconn()
+        self._current_conn = sync_pool.getconn()
         return getattr(self._current_conn, name)
 
 
-# Maintain backward compatibility
+# Backward compatibility
 conn = LegacyConnectionWrapper()
 
 print("✅ Connected to PostgreSQL successfully!")
