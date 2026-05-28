@@ -35,9 +35,12 @@ Available intents:
 12. product_locations - User asks where a specific product is being sold
 13. show_interest - User expresses interest in a specific listing number
 14. view_listing_interests - Farmer wants to see buyer interests on their listings
-15. search_by_price - User searches for product at specific price
-16. view_listing_image - User wants to see the photo/image of a specific listing number
-17. unknown - None of the above match
+15. get_my_interests - Buyer wants to see their own interests/inquiries
+16. cancel_interest - User wants to cancel their interest
+17. reject_interest - Farmer wants to reject a buyer's interest
+18. search_by_price - User searches for product at specific price
+19. view_listing_image - User wants to see the photo/image of a specific listing number
+20. unknown - None of the above match
 
 Extract entities:
 - product: crop name (maize, cassava, tomato, onion, plantain, yam, rice, etc.) — CRITICAL: ONLY extract if the user EXPLICITLY names a specific crop. NEVER set product when user says "price" (that's a different entity!). NEVER set product when user refers to listing by number (e.g. "number 2", "the fourth"). If no crop name is mentioned, set product to null.
@@ -47,6 +50,7 @@ Extract entities:
 - region: region name (Littoral, Centre, Ouest, Nord, Sud, Adamaoua, Est, Extreme-Nord, Nord-Ouest, Sud-Ouest)
 - name: person's name (for profile updates)
 - listing_number: the listing number as a DIGIT (1, 2, 3, etc.) extracted from phrases like "listing 5", "#3", "number 2", "number 4", "number 1", "the 4th one", "the number 4", "listing number 4", "no 3", "first", "second", "third", "fourth", "fifth", "the 1st", "the first one", "the second", "the third", "the fourth of", "the 1st one" — convert ordinals to digits (first→1, second→2, third→3, fourth→4, fifth→5, etc.). Extract for ANY intent (update_listing, show_interest, view_listing_image, delete_listing, etc.)
+- interest_id: numeric ID for interests (for cancel_interest, reject_interest intents) - extract from "cancel interest 123", "reject interest 45"
 
 Respond ONLY with valid JSON in this exact format:
 {

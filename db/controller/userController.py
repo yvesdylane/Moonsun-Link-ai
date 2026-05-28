@@ -16,18 +16,29 @@ def check_if_user_exist(phone):
         return True, user[0]
     return False, None
 
-def create_user_from_whatsapp(phone: str, name: str) -> str:
+def create_user_from_whatsapp(phone: str, name: str, chat_id: str = None) -> str:
     cur = conn.cursor()
     query = """
-        INSERT INTO users (name, phone, whatsapp_number, role, region, lang)
-        VALUES (%s, %s, %s, 'buyer', 'General', 'en')
+        INSERT INTO users (name, phone, whatsapp_number, whatsapp_chat_id, role, region, lang)
+        VALUES (%s, %s, %s, %s, 'buyer', 'General', 'en')
         RETURNING id
     """
-    cur.execute(query, (name, phone, phone))
+    cur.execute(query, (name, phone, phone, chat_id))
     user_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     return user_id
+
+def update_user_chat_id(user_id: str, chat_id: str):
+    """Update user's WhatsApp chat_id if not already set."""
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users
+        SET whatsapp_chat_id = %s
+        WHERE id = %s AND (whatsapp_chat_id IS NULL OR whatsapp_chat_id = '')
+    """, (chat_id, user_id))
+    conn.commit()
+    cur.close()
 
 def get_user_role(user_id: str) -> str | None:
     cur = conn.cursor()

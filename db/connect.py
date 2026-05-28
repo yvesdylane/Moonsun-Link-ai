@@ -34,6 +34,14 @@ class AutoReconnectConnection:
             self._connect()
             self._conn.commit()
 
+    def rollback(self):
+        """Rollback transaction to recover from errors."""
+        try:
+            self._conn.rollback()
+        except psycopg.OperationalError:
+            print("DB connection lost on rollback, reconnecting...")
+            self._connect()
+
     def close(self):
         if self._conn and not self._conn.closed:
             self._conn.close()

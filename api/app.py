@@ -101,17 +101,34 @@ async def _handle_webhook(data: dict):
 
     exist, user_id = check_if_user_exist(phone)
     if not exist:
-        user_id = create_user_from_whatsapp(phone, name)
+        user_id = create_user_from_whatsapp(phone, name, chat_id)
+    else:
+        # Update chat_id if not already set
+        from db.controller.userController import update_user_chat_id
+        update_user_chat_id(str(user_id), chat_id)
 
     result = router.handle(message, str(user_id), image_url=image_url)
     print(f"MESSAGE: {message}")
     print(f"RESULT: {result}")
 
-    # Handle seller notification for interests
+    # Handle notifications (seller, buyer, farmer)
     if result.get("seller_notification"):
         seller_notif = result["seller_notification"]
-        if seller_notif.get("seller_whatsapp") and seller_notif.get("message"):
-            pass
+        if seller_notif.get("chat_id") and seller_notif.get("message"):
+            send_whatsapp_reply(seller_notif["chat_id"], seller_notif["message"])
+            print(f"SELLER NOTIFIED: {seller_notif['chat_id']}")
+
+    if result.get("farmer_notification"):
+        farmer_notif = result["farmer_notification"]
+        if farmer_notif.get("chat_id") and farmer_notif.get("message"):
+            send_whatsapp_reply(farmer_notif["chat_id"], farmer_notif["message"])
+            print(f"FARMER NOTIFIED: {farmer_notif['chat_id']}")
+
+    if result.get("buyer_notification"):
+        buyer_notif = result["buyer_notification"]
+        if buyer_notif.get("chat_id") and buyer_notif.get("message"):
+            send_whatsapp_reply(buyer_notif["chat_id"], buyer_notif["message"])
+            print(f"BUYER NOTIFIED: {buyer_notif['chat_id']}")
 
     # reply section
     detected_lang = result.get("language", "en")

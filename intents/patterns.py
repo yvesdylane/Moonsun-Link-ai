@@ -276,4 +276,52 @@ INTENT_PATTERNS = {
             "what does listing 2 look like"
         ]
     },
+
+    "get_my_interests": {
+        "keywords": [
+            "my interests",
+            "show interests",
+            "view my interests",
+            "my inquiries",
+            "what I'm interested in"
+        ],
+        "examples": [
+            "show me my interests",
+            "view my interests",
+            "what listings am I interested in",
+            "show my inquiries",
+            "list my interests"
+        ]
+    },
+
+    "cancel_interest": {
+        "keywords": [
+            "cancel interest",
+            "remove interest",
+            "delete interest",
+            "withdraw interest"
+        ],
+        "examples": [
+            "cancel interest 123",
+            "remove my interest 45",
+            "I want to cancel interest 67",
+            "delete interest 89",
+            "withdraw my interest 12"
+        ]
+    },
+
+    "reject_interest": {
+        "keywords": [
+            "reject interest",
+            "decline interest",
+            "refuse interest",
+            "deny interest"
+        ],
+        "examples": [
+            "reject interest 123",
+            "decline interest 45",
+            "I want to refuse interest 67",
+            "deny interest 89"
+        ]
+    },
 }

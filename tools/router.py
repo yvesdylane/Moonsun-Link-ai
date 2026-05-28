@@ -18,6 +18,13 @@ class ToolRouter:
             print(f"UNHANDLED ERROR IN ROUTER: {e}")
             traceback.print_exc()
             print("=" * 60)
+            # Rollback transaction to prevent cascade failures
+            from db.connect import conn
+            try:
+                conn.rollback()
+                print("Transaction rolled back successfully")
+            except:
+                pass
             return {
                 "status": "error",
                 "message": "Sorry, an error occurred on our side. Please try again later."
@@ -87,9 +94,11 @@ class ToolRouter:
                         # Context-aware intents - fall through to handler with state
                         pass
                     else:
-                        # Other intents clear the browsing state
+                        # Other intents clear the browsing state and process normally
                         clear_state(user_id)
-                else:
+                        # Fall through to normal handler - don't return error
+                elif not new_pipeline:
+                    # No navigation command and no new intent - show error
                     return {
                         "status": "error",
                         "message": "Reply 'next' or 'previous' to browse pages, or send a new request."
@@ -143,6 +152,9 @@ class ToolRouter:
             "product_locations": self._product_locations,
             "show_interest": self._show_interest,
             "view_listing_interests": self._view_listing_interests,
+            "get_my_interests": self._get_my_interests,
+            "cancel_interest": self._cancel_interest,
+            "reject_interest": self._reject_interest,
             "search_by_price": self._search_by_price,
             "view_listing_image": self._view_listing_image,
         }
@@ -329,13 +341,26 @@ class ToolRouter:
 
     def _browse_page(self, user_id: str, context: dict, direction: int) -> dict:
         page = context["page"] + direction
+
+        # Validate page number
+        if page < 1:
+            return {
+                "status": "error",
+                "message": "You're already on the first page."
+            }
+
         filters = context["filters"]
         result = get_listings(page=page, **filters)
-        if page >= result["total_pages"]:
-            clear_state(user_id)
-        else:
-            context["page"] = page
-            set_state(user_id, "browsing_listings", context)
+
+        if page > result["total_pages"]:
+            return {
+                "status": "error",
+                "message": f"No more pages. Total pages: {result['total_pages']}"
+            }
+
+        # Update state with new page
+        context["page"] = page
+        set_state(user_id, "browsing_listings", context)
         return {"status": "ok", "data": result}
 
     def _delete_listing(self, entities, user_id, image_url=None, text=""):
@@ -754,44 +779,48 @@ class ToolRouter:
 
         listing_id = listing_ids[listing_index]
 
-        # Save interest
-        result = save_interest(listing_id, user_id, quantity)
+        # Save interest (quantity is optional)
+        result = save_interest(listing_id, user_id, quantity if quantity and quantity > 1 else None)
 
         if result["status"] == "error":
             return result
 
-        # Send notification to seller
         listing = result["listing"]
-        buyer = get_user_info(user_id)
-
-        if listing.get("seller_whatsapp"):
-            notification = (
-                f"🔔 *New Interest in Your Listing!*\n\n"
-                f"👤 Buyer: {buyer.name}\n"
-                f"📞 Phone: {buyer.phone}\n"
-                f"🌾 Product: {listing['crop_name'].capitalize()}\n"
-                f"📦 Interested in: {quantity}kg\n"
-                f"💰 Your price: {listing['price']} XAF/kg\n\n"
-                f"Contact them to complete the sale!"
-            )
-            # We need chat_id for seller - will be handled in webhook
-            # For now, just store and farmer can view interests
+        buyer = result["buyer"]
+        seller_notif = result.get("seller_notification", {})
 
         clear_state(user_id)
 
+        # Build buyer confirmation message
+        quantity_text = f"{quantity}kg of " if quantity and quantity > 1 else ""
+        buyer_message = (
+            f"✅ Interest registered!\n\n"
+            f"You're interested in {quantity_text}{listing['crop_name'].capitalize()}\n"
+            f"💰 Price: {listing['price']} XAF/kg\n"
+            f"👤 Farmer: {listing['seller_name']}\n\n"
+            f"The farmer has been notified and will contact you at {buyer['phone']} if interested."
+        )
+
+        # Build seller notification
+        seller_notification = None
+        if seller_notif.get("seller_chat_id"):
+            quantity_text = f"📦 Quantity: {seller_notif['quantity']}kg\n" if seller_notif.get('quantity') else ""
+            seller_notification = {
+                "chat_id": seller_notif["seller_chat_id"],
+                "message": (
+                    f"🔔 *New Interest in Your Listing!*\n\n"
+                    f"🌾 Product: {seller_notif['crop_name'].capitalize()}\n"
+                    f"{quantity_text}"
+                    f"👤 Buyer: {seller_notif['buyer_name']}\n"
+                    f"📞 Contact: {seller_notif['buyer_phone']}\n\n"
+                    f"Contact them to complete the sale!"
+                )
+            }
+
         return {
             "status": "ok",
-            "message": (
-                f"✅ Interest registered!\n\n"
-                f"You're interested in {quantity}kg of {listing['crop_name']}\n"
-                f"💰 Price: {listing['price']} XAF/kg\n"
-                f"👤 Seller: {listing['seller_name']}\n\n"
-                f"The seller has been notified. They may contact you at {buyer.phone}"
-            ),
-            "seller_notification": {
-                "seller_whatsapp": listing.get("seller_whatsapp"),
-                "message": notification if listing.get("seller_whatsapp") else None
-            }
+            "message": buyer_message,
+            "seller_notification": seller_notification
         }
 
     def _view_listing_interests(self, entities, user_id, image_url=None, text=""):
@@ -822,7 +851,9 @@ class ToolRouter:
 
             for interest in data["interests"]:
                 lines.append(f"  • {interest['buyer_name']} ({interest['buyer_phone']})")
-                lines.append(f"    Wants: {interest['quantity']}kg")
+                # Only show quantity if specified
+                if interest['quantity']:
+                    lines.append(f"    Wants: {interest['quantity']}kg")
                 if interest.get("message"):
                     lines.append(f"    Message: {interest['message']}")
                 lines.append("")
@@ -957,6 +988,101 @@ class ToolRouter:
             "message": f"📸 #{listing_number} {crop_name}",
             "preview_image": image
         }
+
+    def _get_my_interests(self, entities, user_id, image_url=None, text=""):
+        """Show user's own interests (buyer view)."""
+        from db.controller.listingInterestController import get_user_interests
+
+        result = get_user_interests(user_id)
+
+        if result["total"] == 0:
+            return {"status": "ok", "message": result["message"]}
+
+        # Format interests
+        lines = [f"💚 *Your Interests* ({result['total']} active)\n"]
+
+        for idx, interest in enumerate(result["interests"], 1):
+            quantity_text = f" - {interest['interested_quantity']}kg" if interest.get('interested_quantity') else ""
+            lines.append(
+                f"#{idx} 🌾 {interest['crop_name'].capitalize()}{quantity_text}\n"
+                f"   💰 {interest['price']} XAF/kg\n"
+                f"   👤 Farmer: {interest['seller_name']}\n"
+                f"   🆔 Interest ID: {interest['interest_id']}\n"
+            )
+
+        lines.append("\n💡 To cancel an interest, send: 'cancel interest [ID]'")
+
+        return {"status": "ok", "message": "\n".join(lines)}
+
+    def _cancel_interest(self, entities, user_id, image_url=None, text=""):
+        """Cancel an interest (buyer cancels)."""
+        from db.controller.listingInterestController import cancel_interest
+
+        # Extract interest_id from entities or text
+        interest_id = entities.get("interest_id")
+
+        if not interest_id:
+            return {
+                "status": "error",
+                "message": "Which interest do you want to cancel?\n\nExample: 'cancel interest 123'"
+            }
+
+        result = cancel_interest(interest_id, user_id)
+
+        # Send notification to farmer if available
+        if result.get("farmer_notification") and result["farmer_notification"].get("farmer_chat_id"):
+            farmer_notif = result["farmer_notification"]
+            notification = {
+                "chat_id": farmer_notif["farmer_chat_id"],
+                "message": (
+                    f"❌ Interest Cancelled\n\n"
+                    f"🌾 Product: {farmer_notif['crop_name'].capitalize()}\n"
+                    f"👤 Buyer: {farmer_notif['buyer_name']}\n\n"
+                    f"The buyer has cancelled their interest."
+                )
+            }
+            result["farmer_notification"] = notification
+
+        return result
+
+    def _reject_interest(self, entities, user_id, image_url=None, text=""):
+        """Reject an interest (farmer rejects)."""
+        from db.controller.listingInterestController import reject_interest
+        from db.controller.userController import get_user_info
+
+        user = get_user_info(user_id)
+        if not user or not user.is_farmer():
+            return {
+                "status": "error",
+                "message": "Only farmers can reject interests."
+            }
+
+        # Extract interest_id from entities or text
+        interest_id = entities.get("interest_id")
+
+        if not interest_id:
+            return {
+                "status": "error",
+                "message": "Which interest do you want to reject?\n\nExample: 'reject interest 123'"
+            }
+
+        result = reject_interest(interest_id, user_id)
+
+        # Send notification to buyer if available
+        if result.get("buyer_notification") and result["buyer_notification"].get("buyer_chat_id"):
+            buyer_notif = result["buyer_notification"]
+            notification = {
+                "chat_id": buyer_notif["buyer_chat_id"],
+                "message": (
+                    f"❌ Interest Declined\n\n"
+                    f"🌾 Product: {buyer_notif['crop_name'].capitalize()}\n"
+                    f"👤 Farmer: {buyer_notif['farmer_name']}\n\n"
+                    f"The farmer has declined your interest. Try contacting other sellers."
+                )
+            }
+            result["buyer_notification"] = notification
+
+        return result
 
     def _unknown(self, entities, user_id, image_url=None, text=""):
         return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}
