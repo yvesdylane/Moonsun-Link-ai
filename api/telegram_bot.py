@@ -330,6 +330,19 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
 
     await send_telegram_reply(update, result)
 
+    # Log message exchange
+    if user_id:
+        from db.controller.messageLogController import log_message_exchange
+        detected_lang = result.get("language", "en")
+        full_reply = extract_reply_text(result)
+        log_message_exchange(
+            user_id=str(user_id),
+            incoming=message,
+            outgoing=full_reply,
+            intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"), dict) else "unknown",
+            platform="telegram"
+        )
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await _handle_photo_inner(update, context)
@@ -373,6 +386,18 @@ async def _handle_photo_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Handle image with router
         result = router.handle(message, str(user_id) if user_id else None, image_url=image_url)
         await send_telegram_reply(update, result)
+
+        # Log message exchange
+        if user_id:
+            from db.controller.messageLogController import log_message_exchange
+            incoming_text = f"[Photo] {message}" if message else "[Photo]"
+            full_reply = extract_reply_text(result)
+            log_message_exchange(
+                user_id=str(user_id),
+                incoming=incoming_text,
+                outgoing=full_reply,
+                intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"), dict) else "unknown"
+            )
 
     finally:
         os.unlink(tmp.name)
@@ -534,6 +559,29 @@ async def _handle_voice_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await send_telegram_reply(update, result)
 
+    # Log message exchange (for voice transcriptions)
+    if user_id:
+        from db.controller.messageLogController import log_message_exchange
+        full_reply = extract_reply_text(result)
+        log_message_exchange(
+            user_id=str(user_id),
+            incoming=message,
+            outgoing=full_reply,
+            intent=result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"), dict) else "unknown",
+            platform="telegram"
+        )
+
+def extract_reply_text(result: dict) -> str:
+    """Extract reply text from router result for logging"""
+    if "data" in result:
+        # Listing data - format a summary
+        data = result["data"]
+        return f"Listings response: {data['total']} results (page {data['page']}/{data['total_pages']})"
+    elif result.get("preview_image"):
+        return result.get("message", "Image sent")
+    else:
+        return result.get("message", "Done")
+
 async def send_telegram_notification(context: ContextTypes.DEFAULT_TYPE, notification: dict):
     """
     Send notification to a Telegram user.
@@ -576,12 +624,17 @@ async def send_telegram_notification(context: ContextTypes.DEFAULT_TYPE, notific
 async def send_telegram_reply(update: Update, result: dict):
     detected_lang = result.get("language", "en")
 
+    # Determine if we should show marketplace button (only for listing-related intents)
+    intent = result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"), dict) else "unknown"
+    account_intents = ["get_my_info", "verify_account", "change_role", "update_profile", "greeting"]
+    show_marketplace = intent not in account_intents
+
     if result.get("preview_image"):
         reply = translate_reply(result.get("message", "Done"), detected_lang)
         await update.message.reply_photo(
             photo=result["preview_image"],
             caption=reply,
-            reply_markup=market_button()
+            reply_markup=market_button() if show_marketplace else None
         )
 
     elif "data" in result:
@@ -600,7 +653,7 @@ async def send_telegram_reply(update: Update, result: dict):
 
     else:
         reply = translate_reply(result.get("message", "Done"), detected_lang)
-        await update.message.reply_text(reply, reply_markup=market_button())
+        await update.message.reply_text(reply, reply_markup=market_button() if show_marketplace else None)
 
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
