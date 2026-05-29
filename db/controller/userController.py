@@ -76,6 +76,54 @@ def create_user_from_telegram(telegram_id: str, name: str, telegram_number: str 
     cur.close()
     return user_id
 
+def check_cross_platform_account(phone_number: str) -> dict:
+    """
+    Check if this phone number exists on other platforms (Telegram, WhatsApp, or SMS).
+
+    Returns:
+        dict with user_id and platform if found, None otherwise
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, telegram_number, whatsapp_number, phone
+        FROM users
+        WHERE telegram_number = %s OR whatsapp_number = %s OR phone = %s
+    """, (phone_number, phone_number, phone_number))
+    result = cur.fetchone()
+    cur.close()
+
+    if not result:
+        return None
+
+    user_id, telegram_num, whatsapp_num, sms_phone = result
+
+    # Determine which platform
+    if telegram_num == phone_number:
+        platform = "Telegram"
+    elif whatsapp_num == phone_number:
+        platform = "WhatsApp"
+    else:
+        platform = "SMS"
+
+    return {
+        "user_id": str(user_id),
+        "platform": platform
+    }
+
+def link_whatsapp_to_existing(user_id: str, whatsapp_number: str, chat_id: str) -> str:
+    """
+    Link WhatsApp number and chat_id to existing account.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users
+        SET whatsapp_number = %s, whatsapp_chat_id = %s, updated_at = NOW()
+        WHERE id = %s
+    """, (whatsapp_number, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    return user_id
+
 def link_telegram_to_account(phone: str, telegram_id: str) -> dict:
     user = get_user_by_phone(phone)
     if not user:

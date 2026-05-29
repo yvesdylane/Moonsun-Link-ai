@@ -126,7 +126,18 @@ async def _handle_webhook(data: dict):
 
     exist, user_id = check_if_user_exist(phone)
     if not exist:
-        user_id = create_user_from_whatsapp(phone, name, chat_id)
+        # Check if this number exists on other platforms (Telegram or SMS)
+        from db.controller.userController import check_cross_platform_account
+        cross_platform = check_cross_platform_account(phone)
+
+        if cross_platform:
+            # Link WhatsApp to existing account
+            from db.controller.userController import link_whatsapp_to_existing
+            user_id = link_whatsapp_to_existing(cross_platform["user_id"], phone, chat_id)
+            print(f"WHATSAPP LINKED TO EXISTING ACCOUNT: {user_id} (from {cross_platform['platform']})")
+        else:
+            # Create new account
+            user_id = create_user_from_whatsapp(phone, name, chat_id)
     else:
         # Update chat_id if not already set
         from db.controller.userController import update_user_chat_id
