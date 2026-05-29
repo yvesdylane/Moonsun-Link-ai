@@ -76,6 +76,9 @@ EXAMPLES:
 "The price to 200" → {"intent": "update_listing", "entities": {"price": 200, "product": null}}
 "Show all listings on the market" → {"intent": "search_listings", "entities": {}}
 "What products are available" → {"intent": "show_available_products", "entities": {}}
+"Centre" → {"intent": "update_profile", "entities": {"region": "Centre"}} (when user responds with just a region name)
+"Littoral" → {"intent": "update_profile", "entities": {"region": "Littoral"}}
+"Update my region to Ouest" → {"intent": "update_profile", "entities": {"region": "Ouest"}}
 
 Rules:
 - confidence should be between 0.0 and 1.0
@@ -85,7 +88,8 @@ Rules:
 - For "update_listing", ALWAYS check if listing_number is present first before extracting product
 - For "change_role" intent, extract the region from phrases like "in Littoral" or "farmer in Centre"
 - For "update_listing", look for keywords: update, change, edit, modify + listing/product
-- For "change_role", look for: become farmer, switch to farmer, upgrade to farmer, change role
+- For "change_role", look for: become farmer, switch to farmer, upgrade to farmer, change role, change my role to farmer
+- For "update_profile", look for: update my name, update my region, change my region, OR if user sends ONLY a region name (Centre, Littoral, Nord, Sud, Ouest, Est, etc.) classify as update_profile with that region
 - For "show_available_products", look for: what products, available products, list products, what's available, what crops - returns PRODUCT NAMES ONLY
 - For "search_listings", look for: show all listings, market listings, show listings, product propositions on the market, browse listings, find [product], search - returns FULL LISTING DETAILS
 - For "product_locations", look for: where is X, where can I find X, where to buy X

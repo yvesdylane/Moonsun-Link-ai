@@ -740,22 +740,32 @@ class ToolRouter:
         if user.is_farmer():
             return {"status": "error", "message": "You are already a farmer. To change your region, send: 'update my region to [region name]'"}
 
+        # Check if user provided a region in this message
         region = entities.get("region")
-        if not region:
-            return {
-                "status": "error",
-                "message": (
-                    "📍 *Region Selection*\n\n"
-                    "Your region refers to your main area of activity.\n\n"
-                    "If you operate across all of Cameroon, you can leave it as \"General\".\n\n"
-                    "Which region?\n"
-                    "• Adamaoua\n• Centre\n• Est\n• Extreme-Nord\n• Littoral\n• Nord\n"
-                    "• Nord-Ouest\n• Ouest\n• Sud\n• Sud-Ouest\n• General\n\n"
-                    "Example: 'change my role to farmer in Littoral'"
-                )
-            }
 
-        return change_role_to_farmer(user_id, region)
+        if not region:
+            # Use existing region from profile
+            region = user.region if user.region else "General"
+
+        # If region is still "General", warn but allow (they can update later)
+        result = change_role_to_farmer(user_id, region)
+
+        # Add verification reminder and region update suggestion if successful
+        if result["status"] == "ok":
+            if region == "General":
+                result["message"] += (
+                    "\n\n💡 *Tip*: You're set to operate across all Cameroon (General).\n"
+                    "To specify your main region, send: 'update my region to [region name]'"
+                )
+
+            if not user.is_verified():
+                result["message"] += (
+                    "\n\n⚠️ *Verification Required*\n\n"
+                    "Your listings won't be visible to buyers until you verify your account.\n\n"
+                    "To get verified, send: 'verify my account'"
+                )
+
+        return result
 
     def _update_profile(self, entities, user_id, image_url=None, text=""):
         from db.controller.userController import update_user_info
