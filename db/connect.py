@@ -16,12 +16,14 @@ DB_CONFIG = {
 CONNINFO = " ".join([f"{k}={v}" for k, v in DB_CONFIG.items()])
 
 # Async connection pool (preferred for new code)
-# Don't open in constructor - will be opened by FastAPI lifespan
+# open=False — pool is opened later by FastAPI lifespan, avoiding
+# "no running loop" error at module import time.
 async_pool = AsyncConnectionPool(
     conninfo=CONNINFO,
     min_size=2,
     max_size=20,
-    timeout=30
+    timeout=30,
+    open=False,
 )
 
 # Sync connection pool (for legacy code during migration)
