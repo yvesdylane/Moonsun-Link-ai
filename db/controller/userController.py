@@ -60,13 +60,17 @@ def check_if_user_exist_by_telegram(telegram_id: str):
         return True, user[0]
     return False, None
 
-def create_user_from_telegram(telegram_id: str, name: str, phone: str = None, region: str = "General") -> str:
+def create_user_from_telegram(telegram_id: str, name: str, telegram_number: str = None, region: str = "General") -> str:
+    """
+    Create user from Telegram.
+    telegram_number is stored in telegram_number field, NOT phone (phone is for SMS).
+    """
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO users (name, telegram_id, phone, role, region, lang)
+        INSERT INTO users (name, telegram_id, telegram_number, role, region, lang)
         VALUES (%s, %s, %s, 'buyer', %s, 'en')
         RETURNING id
-    """, (name, telegram_id, phone, region))
+    """, (name, telegram_id, telegram_number, region))
     user_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
