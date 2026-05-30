@@ -128,9 +128,38 @@ async def _handle_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
     telegram_id = str(user.id)
 
     if data == "link_account":
+        from utils.translator import translate_reply
+        user_lang = context.user_data.get("user_lang", "en")
+
+        # Check if we have their Telegram number from registration
+        telegram_number = context.user_data.get("reg_telegram_number")
+
+        if telegram_number:
+            context.user_data["link_phone"] = telegram_number
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Use this number", callback_data="confirm_link_number")],
+                [InlineKeyboardButton("📝 Enter different number", callback_data="enter_link_number")],
+            ])
+            await query.message.reply_text(
+                f"Your Telegram number is: {telegram_number}\n\n"
+                "Would you like to link this number, or enter a different WhatsApp number?",
+                reply_markup=keyboard
+            )
+        else:
+            context.user_data["state"] = "awaiting_phone_link"
+            await query.message.reply_text(
+                "Enter the phone number linked to your WhatsApp account:\n"
+                "_(include country code, e.g. +237651234567)_",
+                parse_mode="Markdown"
+            )
+
+    elif data == "confirm_link_number":
+        await _start_verification_for_phone(context, query)
+
+    elif data == "enter_link_number":
         context.user_data["state"] = "awaiting_phone_link"
         await query.message.reply_text(
-            "Enter the phone number linked to your WhatsApp account:\n"
+            "Enter the WhatsApp number you want to link:\n"
             "_(include country code, e.g. +237651234567)_",
             parse_mode="Markdown"
         )
@@ -159,24 +188,53 @@ async def _handle_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
         existing_id = context.user_data.get("link_existing_id")
         telegram_number = context.user_data.get("reg_telegram_number")
 
-        # Link telegram to existing account
+        # Get the phone number of the existing WhatsApp account
         cur = conn.cursor()
         cur.execute("""
-            UPDATE users
-            SET telegram_id = %s, telegram_number = %s, updated_at = NOW()
-            WHERE id = %s
-        """, (telegram_id, telegram_number, existing_id))
-        conn.commit()
+            SELECT whatsapp_number, whatsapp_chat_id FROM users WHERE id = %s
+        """, (existing_id,))
+        row = cur.fetchone()
         cur.close()
 
-        context.user_data["state"] = None
+        if not row or not row[0]:
+            await query.message.reply_text(translate_reply(
+                "❌ Could not find the WhatsApp account details. Please try again.",
+                user_lang
+            ))
+            return
 
-        reply = translate_reply(
-            "✅ Accounts linked successfully! Welcome back 🌾\n\n"
-            "You can now use Moonso Link on both platforms.",
+        whatsapp_number, whatsapp_chat_id = row
+
+        if not whatsapp_chat_id:
+            await query.message.reply_text(translate_reply(
+                "❌ That account doesn't have an active WhatsApp connection.\n\n"
+                "Please use Moonso Link on WhatsApp first.",
+                user_lang
+            ))
+            return
+
+        # Store context for the verification step
+        context.user_data["link_target_phone"] = whatsapp_number
+        context.user_data["link_target_user_id"] = existing_id
+        context.user_data["link_from_registration"] = True
+        context.user_data["link_reg_telegram_number"] = telegram_number
+
+        # Send verification code
+        from db.controller.userController import generate_linking_code
+        from utils.whatsapp import send_whatsapp_reply
+        code = generate_linking_code(existing_id)
+        message = f"🔐 Your Moonso Link verification code is: {code}\n\nEnter this code in Telegram to complete account linking. Code expires in 5 minutes."
+        send_whatsapp_reply(whatsapp_chat_id, message)
+
+        context.user_data["state"] = "awaiting_verification_code"
+
+        await query.message.reply_text(translate_reply(
+            f"✅ Verification code sent to {whatsapp_number} via WhatsApp!\n\n"
+            "Enter the 6-digit code in Telegram to complete linking.\n"
+            "_Code expires in 5 minutes._\n\n"
+            "To resend the code, type: /resend",
             user_lang
-        )
-        await query.message.reply_text(reply)
+        ), parse_mode="Markdown")
 
     elif data == "link_no":
         from utils.translator import translate_reply
@@ -209,6 +267,128 @@ async def _handle_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
             user_lang
         )
         await query.message.reply_text(reply)
+
+async def _start_verification_for_phone(context: ContextTypes.DEFAULT_TYPE,
+                                        source: str = None,
+                                        phone: str = None) -> tuple:
+    """
+    Look up a WhatsApp number, send verification code, set state.
+
+    Args:
+        context: Telegram context.user_data
+        source: 'callback' (from link_yes/confirm_link_number) or 'text' (from awaiting_phone_link)
+        phone: phone number if already known, else read from context
+
+    Returns:
+        (success: bool, reply_text: str)
+    """
+    from db.controller.userController import find_whatsapp_user_by_number, generate_linking_code
+    from utils.whatsapp import send_whatsapp_reply
+    from utils.translator import translate_reply
+
+    user_lang = context.user_data.get("user_lang", "en")
+
+    if not phone:
+        phone = context.user_data.get("link_phone", "")
+
+    phone = phone.strip()
+    if not phone.startswith("+"):
+        phone = "+" + phone
+
+    # Look up the number
+    user = find_whatsapp_user_by_number(phone)
+    if user is None:
+        context.user_data["state"] = None
+        return (False, translate_reply(
+            f"❌ No Moonso account found with WhatsApp number {phone}.\n\n"
+            "Make sure you have used Moonso Link on WhatsApp first.",
+            user_lang
+        ))
+
+    if user.get("status") == "no_chat_id":
+        context.user_data["state"] = None
+        return (False, translate_reply(
+            f"❌ The number {phone} doesn't have an active WhatsApp connection on Moonso.\n\n"
+            "Please use Moonso Link on WhatsApp first, then try linking.",
+            user_lang
+        ))
+
+    # Generate and store verification code
+    code = generate_linking_code(user["id"])
+    context.user_data["link_target_phone"] = phone
+    context.user_data["link_target_user_id"] = user["id"]
+    context.user_data["state"] = "awaiting_verification_code"
+
+    # Send code to their WhatsApp
+    message = f"🔐 Your Moonso Link verification code is: {code}\n\nEnter this code in Telegram to complete account linking. Code expires in 5 minutes."
+    send_whatsapp_reply(user["whatsapp_chat_id"], message)
+
+    return (True, translate_reply(
+        f"✅ Verification code sent to {phone} via WhatsApp!\n\n"
+        "Enter the 6-digit code in Telegram to complete linking.\n"
+        "_Code expires in 5 minutes._\n\n"
+        "To resend the code, type: /resend",
+        user_lang
+    ))
+
+
+async def resend_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /resend command — resend verification code."""
+    try:
+        await _resend_code_inner(update, context)
+    except Exception as e:
+        print(f"RESEND CODE ERROR: {e}")
+        traceback.print_exc()
+        await update.message.reply_text("Sorry, an error occurred. Please start the linking process again from /start.")
+
+
+async def _resend_code_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from db.controller.userController import generate_linking_code, find_whatsapp_user_by_number
+    from utils.whatsapp import send_whatsapp_reply
+    from utils.translator import translate_reply
+
+    user_lang = context.user_data.get("user_lang", "en")
+    state = context.user_data.get("state")
+
+    if state != "awaiting_verification_code":
+        await update.message.reply_text(translate_reply(
+            "❌ No active verification in progress.\n\n"
+            "To start linking your account, send /start and click 'Link WhatsApp account'.",
+            user_lang
+        ))
+        return
+
+    target_phone = context.user_data.get("link_target_phone")
+    target_user_id = context.user_data.get("link_target_user_id")
+
+    if not target_phone or not target_user_id:
+        context.user_data["state"] = None
+        await update.message.reply_text(translate_reply(
+            "❌ Verification session expired. Please start linking again from /start.",
+            user_lang
+        ))
+        return
+
+    # Generate new code
+    code = generate_linking_code(target_user_id)
+
+    # Send to WhatsApp
+    user = find_whatsapp_user_by_number(target_phone)
+    if not user or user.get("status") != "ok":
+        await update.message.reply_text(translate_reply(
+            "❌ Could not send the code. Please start linking again from /start.",
+            user_lang
+        ))
+        return
+
+    message = f"🔐 Your new Moonso Link verification code is: {code}\n\nEnter this code in Telegram to complete account linking. Code expires in 5 minutes."
+    send_whatsapp_reply(user["whatsapp_chat_id"], message)
+
+    await update.message.reply_text(translate_reply(
+        f"✅ New code sent to {target_phone}!\n\nEnter the 6-digit code in Telegram.\n_Code expires in 5 minutes._",
+        user_lang
+    ), parse_mode="Markdown")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -287,13 +467,72 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if state == "awaiting_phone_link":
-        from db.controller.userController import link_telegram_to_account
-        result = link_telegram_to_account(message.strip(), telegram_id)
-        if result["status"] == "ok":
-            context.user_data["state"] = None
-            await update.message.reply_text(f"✅ Account linked successfully! Welcome back {result['name']} 🌾")
-        else:
-            await update.message.reply_text("❌ No account found with that number. Try again or send /start to create one.")
+        context.user_data["link_phone"] = message.strip()
+        success, reply = await _start_verification_for_phone(context, source="text")
+        await update.message.reply_text(reply, parse_mode="Markdown")
+        return
+
+    if state == "awaiting_verification_code":
+        from db.controller.userController import verify_linking_code, find_whatsapp_user_by_number, link_and_merge_accounts
+        from utils.whatsapp import send_whatsapp_reply
+        from utils.translator import translate_reply
+        user_lang = context.user_data.get("user_lang", "en")
+
+        target_phone = context.user_data.get("link_target_phone", "")
+        entered_code = message.strip()
+
+        # Allow 6-digit codes only
+        if not entered_code.isdigit() or len(entered_code) != 6:
+            await update.message.reply_text(translate_reply(
+                "❌ Please enter the 6-digit verification code sent to your WhatsApp.\n\n"
+                "To resend the code, type: /resend",
+                user_lang
+            ))
+            return
+
+        result = verify_linking_code(target_phone, entered_code)
+
+        if result["status"] == "error":
+            await update.message.reply_text(translate_reply(result["message"], user_lang))
+            return
+
+        # Code verified successfully — complete linking
+        whatsapp_user_id = result["id"]
+
+        # Check if Telegram user already has a separate DB account (merge needed)
+        from db.controller.userController import get_user_by_telegram
+        telegram_user = get_user_by_telegram(telegram_id)
+        telegram_user_id_to_merge = str(telegram_user[0]) if telegram_user else None
+
+        # Get the Telegram number if available
+        telegram_number = context.user_data.get("reg_telegram_number")
+
+        # Link and optionally merge
+        link_result = link_and_merge_accounts(
+            whatsapp_user_id=whatsapp_user_id,
+            telegram_id=telegram_id,
+            telegram_number=telegram_number,
+            telegram_user_id_to_merge=telegram_user_id_to_merge
+        )
+
+        context.user_data["state"] = None
+
+        # Send confirmation to WhatsApp
+        try:
+            user_info = find_whatsapp_user_by_number(target_phone)
+            if user_info and user_info.get("status") == "ok":
+                send_whatsapp_reply(
+                    user_info["whatsapp_chat_id"],
+                    "✅ Your Telegram account has been linked to Moonso Link!\n\nYou can now use Moonso Link on both platforms."
+                )
+        except Exception:
+            pass
+
+        await update.message.reply_text(translate_reply(
+            f"✅ Accounts linked successfully! Welcome back {result['name']} 🌾\n\n"
+            "You can now use Moonso Link on both Telegram and WhatsApp.",
+            user_lang
+        ), parse_mode="Markdown")
         return
 
     # ── Guest or registered user ───────────────────────────────────────────
@@ -659,6 +898,7 @@ def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("create", create_account))
     app.add_handler(CommandHandler("market", market))
+    app.add_handler(CommandHandler("resend", resend_code))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

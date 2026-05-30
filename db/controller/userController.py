@@ -125,6 +125,7 @@ def link_whatsapp_to_existing(user_id: str, whatsapp_number: str, chat_id: str) 
     return user_id
 
 def link_telegram_to_account(phone: str, telegram_id: str) -> dict:
+    """Legacy: immediately link Telegram to an account by phone. No verification."""
     user = get_user_by_phone(phone)
     if not user:
         return {"status": "error", "message": "No account found"}
@@ -133,6 +134,178 @@ def link_telegram_to_account(phone: str, telegram_id: str) -> dict:
     conn.commit()
     cur.close()
     return {"status": "ok", "name": user[2]}
+
+
+import random
+from datetime import datetime, timedelta, timezone
+
+
+def find_whatsapp_user_by_number(phone: str) -> dict:
+    """
+    Look up a user by their whatsapp_number column.
+    Returns user info if found and has a whatsapp_chat_id.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, whatsapp_chat_id, created_at, user_id
+        FROM users
+        WHERE whatsapp_number = %s
+    """, (phone,))
+    row = cur.fetchone()
+    cur.close()
+
+    if not row:
+        return None  # No account with this WhatsApp number
+
+    user_id, name, chat_id, created_at, user_id_str = row
+    if not chat_id:
+        return {"status": "no_chat_id", "id": str(user_id), "name": name}
+
+    return {
+        "status": "ok",
+        "id": str(user_id),
+        "name": name,
+        "whatsapp_chat_id": chat_id,
+        "created_at": created_at
+    }
+
+
+def generate_linking_code(user_id: str) -> str:
+    """
+    Generate a 6-digit verification code, store it and expiry on the user row.
+    Returns the generated code.
+    """
+    code = str(random.randint(100000, 999999))
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users
+        SET linking_code = %s, code_expire_at = %s, updated_at = NOW()
+        WHERE id = %s
+    """, (code, expires_at, user_id))
+    conn.commit()
+    cur.close()
+
+    return code
+
+
+def verify_linking_code(phone: str, entered_code: str) -> dict:
+    """
+    Verify the linking code for a WhatsApp user.
+    Returns the user row on success, error dict on failure.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, name, linking_code, code_expire_at, created_at, user_id
+        FROM users
+        WHERE whatsapp_number = %s
+    """, (phone,))
+    row = cur.fetchone()
+    cur.close()
+
+    if not row:
+        return {"status": "error", "message": "No account found with that number"}
+
+    user_id, name, stored_code, expires_at, created_at, user_id_str = row
+
+    if not stored_code:
+        return {"status": "error", "message": "No verification code was sent. Please start the linking process again."}
+
+    if expires_at and expires_at < datetime.now(timezone.utc):
+        return {"status": "error", "message": "❌ Verification code has expired. Please start linking again."}
+
+    if stored_code != entered_code:
+        return {"status": "error", "message": "❌ Incorrect code. Please try again."}
+
+    # Clear the code fields
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users SET linking_code = NULL, code_expire_at = NULL, updated_at = NOW()
+        WHERE id = %s
+    """, (user_id,))
+    conn.commit()
+    cur.close()
+
+    return {
+        "status": "ok",
+        "id": str(user_id),
+        "name": name,
+        "created_at": created_at
+    }
+
+
+def _merge_accounts(keep_id: str, merge_from_id: str) -> dict:
+    """
+    Merge data from merge_from account into keep account.
+
+    1. Update FK references from merge_from_id to keep_id
+    2. Delete the merge_from account
+    """
+    cur = conn.cursor()
+
+    # Tables that reference users.id
+    for table in ("listings", "listing_interests", "conversation_state",
+                  "message_logs", "assistant_logs"):
+        cur.execute(
+            f"UPDATE {table} SET user_id = %s WHERE user_id = %s",
+            (keep_id, merge_from_id)
+        )
+
+    # Delete the merged-from account
+    cur.execute("DELETE FROM users WHERE id = %s", (merge_from_id,))
+
+    conn.commit()
+    cur.close()
+    return {"status": "ok"}
+
+
+def link_and_merge_accounts(whatsapp_user_id: str, telegram_id: str, telegram_number: str = None,
+                            telegram_user_id_to_merge: str = None) -> dict:
+    """
+    Complete the linking process:
+    1. Set telegram_id/telegram_number on the WhatsApp account
+    2. If there's a separate Telegram user account, merge it into the WhatsApp account
+       (keep the older account's ID)
+    """
+    cur = conn.cursor()
+
+    if telegram_user_id_to_merge and telegram_user_id_to_merge != whatsapp_user_id:
+        # Determine which account is older
+        cur.execute("""
+            SELECT id, created_at FROM users WHERE id IN (%s, %s)
+        """ % ('%s', '%s'), (whatsapp_user_id, telegram_user_id_to_merge))
+        rows = cur.fetchall()
+
+        if len(rows) == 2:
+            id_a, created_a = rows[0]
+            id_b, created_b = rows[1]
+            id_a, id_b = str(id_a), str(id_b)
+
+            keep_id = id_a if created_a <= created_b else id_b
+            merge_id = id_b if keep_id == id_a else id_a
+
+            _merge_accounts(keep_id, merge_id)
+            whatsapp_user_id = keep_id  # the surviving ID
+
+    # Set telegram_id and telegram_number on the surviving account
+    if telegram_number:
+        cur.execute("""
+            UPDATE users
+            SET telegram_id = %s, telegram_number = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (telegram_id, telegram_number, whatsapp_user_id))
+    else:
+        cur.execute("""
+            UPDATE users
+            SET telegram_id = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (telegram_id, whatsapp_user_id))
+
+    conn.commit()
+    cur.close()
+
+    return {"status": "ok", "user_id": whatsapp_user_id}
 
 def get_user_info(user_id: str) -> Optional[User]:
     cur = conn.cursor()
