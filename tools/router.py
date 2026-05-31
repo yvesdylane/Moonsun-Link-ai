@@ -128,20 +128,12 @@ class ToolRouter:
 
             # ── awaiting_location ──────────────────────────────────────
             if state["state"] == "awaiting_location":
-                if new_pipeline:
-                    intent = new_pipeline["intent"]["intent"]
-                    confidence = new_pipeline["intent"]["confidence"]
-                    explicit_intents = [
-                        "greeting", "get_my_listings", "search_listings",
-                        "get_my_info", "show_available_products", "get_crop_price",
-                        "get_all_crop_prices", "get_my_interests", "view_listing_interests"
-                    ]
-                    if intent in explicit_intents and confidence > 0.7:
-                        clear_state(user_id)
-                    else:
-                        result = self._handle_location_input(text, user_id, state["context"])
-                        result["language"] = "en"
-                        return result
+                if new_pipeline and new_pipeline["intent"]["confidence"] > 0.7:
+                    clear_state(user_id)
+                else:
+                    result = self._handle_location_input(text, user_id, state["context"])
+                    result["language"] = "en"
+                    return result
                 else:
                     result = self._handle_location_input(text, user_id, state["context"])
                     result["language"] = "en"
