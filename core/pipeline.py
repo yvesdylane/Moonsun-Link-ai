@@ -3,6 +3,7 @@ from entities.extractor import EntityExtractor
 from db.controller.logController import log_message
 from utils.translator import translate_to_english
 
+
 class AssistantPipeline:
     def __init__(self):
         self.classifier = GroqIntentClassifier()
@@ -20,9 +21,11 @@ class AssistantPipeline:
         # Fallback entity extraction using regex patterns if Groq missed something
         regex_entities = self.extractor.extract(translated_text)
 
-        # Merge entities: prioritize Groq, fallback to regex
+        # Merge entities:
+        # - Product: trust Groq exclusively (handles whitelist, auto-create, rejection)
+        # - Other fields: Groq first, regex fallback for numeric/measurement fields
         entities = {
-            "product": groq_entities.get("product") or regex_entities.get("product"),
+            "product": groq_entities.get("product"),
             "quantity": groq_entities.get("quantity") or regex_entities.get("quantity"),
             "measurement": groq_entities.get("measurement") or regex_entities.get("measurement"),
             "price": groq_entities.get("price") or regex_entities.get("price"),
@@ -31,6 +34,11 @@ class AssistantPipeline:
             "origin": groq_entities.get("origin") or regex_entities.get("origin"),
             "name": groq_entities.get("name"),
             "listing_number": groq_entities.get("listing_number"),
+            "auto_create": groq_entities.get("auto_create", False),
+            "valid": groq_entities.get("valid", True),
+            "rejection_reason": groq_entities.get("rejection_reason"),
+            "product_type": groq_entities.get("product_type"),
+            "default_measurement": groq_entities.get("default_measurement"),
         }
 
         intent = {

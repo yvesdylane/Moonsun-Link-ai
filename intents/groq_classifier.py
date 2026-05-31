@@ -2,13 +2,39 @@ import os
 import json
 from groq import Groq
 from dotenv import load_dotenv
+from db.connect import conn
 
 load_dotenv()
+
 
 class GroqIntentClassifier:
     def __init__(self):
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model = "llama-3.3-70b-versatile"
+        self.product_whitelist_str = self._load_product_whitelist()
+
+    def _load_product_whitelist(self) -> str:
+        """Build a formatted string of all approved products from the DB."""
+        from entities.vocabulary import PRODUCT_SYNONYMS
+        cur = conn.cursor()
+        cur.execute("SELECT name, type, default_measurement FROM products ORDER BY type, name")
+        rows = cur.fetchall()
+        cur.close()
+
+        groups = {"crop": [], "animal": [], "tool": [], "service": []}
+        for name, ptype, meas in rows:
+            syns = PRODUCT_SYNONYMS.get(name)
+            entry = name
+            if syns:
+                entry += f" (a.k.a. {syns})"
+            groups[ptype].append(entry)
+
+        lines = []
+        for ptype in ["crop", "animal", "tool", "service"]:
+            if groups[ptype]:
+                lines.append(f"{ptype}s: {', '.join(groups[ptype])}")
+
+        return "\n".join(lines)
 
     def classify(self, text: str) -> dict:
         """
@@ -18,12 +44,12 @@ class GroqIntentClassifier:
             dict with keys: intent, confidence, entities
         """
 
-        system_prompt = """You are an intent classifier for Moonso Link, an agricultural marketplace platform.
+        system_prompt = f"""You are an intent classifier for Moonso Link, an agricultural marketplace platform.
 
 Available intents:
 1. greeting - User says hello or greets the bot
 2. create_listing - User wants to sell/post a product
-3. search_listings - User wants to find/browse products with specific criteria OR see all marketplace listings (e.g., "show all listings", "show listings on the market", "market listings", "product propositions")
+3. search_listings - User wants to find/browse products with specific criteria OR see all marketplace listings
 4. get_my_listings - User wants to see their own listings
 5. update_listing - User wants to update/edit/change an existing listing
 6. delete_listing - User wants to remove/delete a listing
@@ -31,7 +57,7 @@ Available intents:
 8. verify_account - User wants to verify their farmer account
 9. change_role - User wants to become a farmer (upgrade from buyer)
 10. update_profile - User wants to update their name or region
-11. show_available_products - User asks what products/crops are available (product NAMES only, not full listings) - e.g., "what products are available?", "what crops can I find?"
+11. show_available_products - User asks what products are available (NAMES only)
 12. product_locations - User asks where a specific product is being sold
 13. show_interest - User expresses interest in a specific listing number
 14. view_listing_interests - Farmer wants to see buyer interests on their listings
@@ -39,68 +65,67 @@ Available intents:
 16. cancel_interest - User wants to cancel their interest
 17. reject_interest - Farmer wants to reject a buyer's interest
 18. search_by_price - User searches for product at specific price
-19. view_listing_image - User wants to see the photo/image of a specific listing number
-20. get_crop_price - User asks for crop price in specific region or all regions (e.g., "what's the price of maize?", "how much is cassava in Centre?")
-21. get_all_crop_prices - User wants overview of all crop prices (e.g., "show all crop prices", "market overview")
+19. view_listing_image - User wants to see the photo of a specific listing number
+20. get_crop_price - User asks for market price of a product (optionally in a region)
+21. get_all_crop_prices - User wants price overview of all products
 22. unknown - None of the above match
 
+PRODUCT WHITELIST — Only these products are accepted:
+{self.product_whitelist_str}
+
+PRODUCT VALIDATION RULES (CRITICAL):
+- If the user wants to sell/search for a product, FIRST check if it matches an item in the whitelist above (including synonyms).
+  - If found: set product to the EXACT whitelist name. Set auto_create to false.
+- If NOT in the whitelist, decide:
+  - Is it clearly an AGRICULTURE-RELATED product? (fruits, vegetables, livestock, farming tools, agricultural services, crops, seeds, fertilizers, etc.)
+    - If YES: set product to the name, auto_create to true, product_type to the correct type (crop/animal/tool/service), and default_measurement to the appropriate unit.
+    - If NO (e.g., dresses, watches, phones, electronics, furniture, clothes, shoes, bags that aren't agricultural): set product to null, auto_create to false, valid to false, and rejection_reason to a helpful message saying we only support agriculture-related products.
+
 Extract entities:
-- product: crop name (maize, cassava, tomato, onion, plantain, yam, rice, etc.) — CRITICAL: ONLY extract if the user EXPLICITLY names a specific crop. NEVER set product when user says "price" (that's a different entity!). NEVER set product when user refers to listing by number (e.g. "number 2", "the fourth"). If no crop name is mentioned, set product to null.
-- quantity: amount in kg (numeric) — also recognize "quality" as a misspelling of quantity
-- price: price per kg in XAF/FCFA (numeric) — extract from phrases like "price of 200", "at 300 XAF", "for 150". DO NOT confuse with "rice" crop.
+- product: the exact product name from the whitelist, or a new agriculture product name if auto-creating
+- quantity: numeric amount — also recognize "quality" as misspelling of quantity
+- measurement: unit (kg, bag, gallon, hour, head, piece, task, etc.)
+- price: numeric price in XAF/FCFA
 - location: town/city name
 - region: region name (Littoral, Centre, Ouest, Nord, Sud, Adamaoua, Est, Extreme-Nord, Nord-Ouest, Sud-Ouest)
 - name: person's name (for profile updates)
-- listing_number: the listing number as a DIGIT (1, 2, 3, etc.) extracted from phrases like "listing 5", "#3", "number 2", "number 4", "number 1", "the 4th one", "the number 4", "listing number 4", "no 3", "first", "second", "third", "fourth", "fifth", "the 1st", "the first one", "the second", "the third", "the fourth of", "the 1st one" — convert ordinals to digits (first→1, second→2, third→3, fourth→4, fifth→5, etc.). Extract for ANY intent (update_listing, show_interest, view_listing_image, delete_listing, etc.)
-- interest_id: numeric ID for interests (for cancel_interest, reject_interest intents) - extract from "cancel interest 123", "reject interest 45"
+- listing_number: converted from ordinals (first→1, second→2, etc.)
+- interest_id: numeric ID for interests
+- auto_create: true/false — set to true if product is not in whitelist but IS agriculture-related
+- valid: true/false — set to false ONLY for non-agriculture product rejections
+- rejection_reason: string explaining why product was rejected
+- product_type: crop/animal/tool/service — only needed when auto_create is true
+- default_measurement: kg/head/piece/task — only needed when auto_create is true
 
 Respond ONLY with valid JSON in this exact format:
-{
+{{
     "intent": "intent_name",
     "confidence": 0.95,
-    "entities": {
+    "entities": {{
         "product": "maize",
         "quantity": 50,
+        "measurement": "kg",
         "price": 300,
         "location": "Douala",
         "region": "Littoral",
         "name": null,
-        "listing_number": null
-    }
-}
+        "listing_number": null,
+        "interest_id": null,
+        "auto_create": false,
+        "valid": true,
+        "rejection_reason": null,
+        "product_type": null,
+        "default_measurement": null
+    }}
+}}
 
 EXAMPLES:
-"Update number 1 to have a price of 200" → {"intent": "update_listing", "entities": {"listing_number": 1, "price": 200, "product": null}}
-"Update the fourth one to have a quantity of 200kg" → {"intent": "update_listing", "entities": {"listing_number": 4, "quantity": 200, "product": null}}
-"Update the first one to have a price of 200 and quantity to 200" → {"intent": "update_listing", "entities": {"listing_number": 1, "price": 200, "quantity": 200, "product": null}}
-"The price to 200" → {"intent": "update_listing", "entities": {"price": 200, "product": null}}
-"Show all listings on the market" → {"intent": "search_listings", "entities": {}}
-"What products are available" → {"intent": "show_available_products", "entities": {}}
-"Centre" → {"intent": "update_profile", "entities": {"region": "Centre"}} (when user responds with just a region name)
-"Littoral" → {"intent": "update_profile", "entities": {"region": "Littoral"}}
-"Update my region to Ouest" → {"intent": "update_profile", "entities": {"region": "Ouest"}}
-
-Rules:
-- confidence should be between 0.0 and 1.0
-- Only include entities that are present in the text
-- Set missing entities to null
-- NEVER confuse "price" with "rice" — "price" is a numeric entity, "rice" is a crop name (product)
-- For "update_listing", ALWAYS check if listing_number is present first before extracting product
-- For "change_role" intent, extract the region from phrases like "in Littoral" or "farmer in Centre"
-- For "update_listing", look for keywords: update, change, edit, modify + listing/product
-- For "change_role", look for: become farmer, switch to farmer, upgrade to farmer, change role, change my role to farmer
-- For "update_profile", look for: update my name, update my region, change my region, OR if user sends ONLY a region name (Centre, Littoral, Nord, Sud, Ouest, Est, etc.) classify as update_profile with that region
-- For "show_available_products", look for: what products, available products, list products, what's available, what crops - returns PRODUCT NAMES ONLY
-- For "search_listings", look for: show all listings, market listings, show listings, product propositions on the market, browse listings, find [product], search - returns FULL LISTING DETAILS
-- For "product_locations", look for: where is X, where can I find X, where to buy X
-- For "search_by_price", user asks if anyone is selling product at specific price
-- For "view_listing_interests", farmer asks to see buyer interests
-- For "view_listing_image", user asks to see photo/image of a listing number
-- For "get_crop_price", user asks about market price of a crop (can include region)
-- For "get_all_crop_prices", user asks for price overview of all crops
-- CRITICAL: When user says "update number X" or "the first one", extract listing_number and DO NOT extract product
-- CRITICAL DISTINCTION: "what products are available?" = show_available_products (names only), "show all listings" = search_listings (full details)
-- CRITICAL DISTINCTION: "what's the price of maize?" = get_crop_price (market prices), "find maize at 200 XAF" = search_by_price (listings at price)
+"I want to sell 50kg of mangoes at 300 XAF" → product not in whitelist but IS agriculture (fruit) → auto_create:true, product_type:"crop"
+"I want to sell my dresses" → not agriculture → product:null, valid:false, rejection_reason:"Dresses are not an agricultural product. We only support agriculture-related products such as crops, livestock, farming tools, and agricultural services."
+"I want to sell a bag of rice" → "rice" is in whitelist → product:"rice", auto_create:false
+"I want to sell my tractor" → "tractor" is in whitelist under tools → product:"tractor", auto_create:false
+"I offer mechanic services" → "mechanic" is in whitelist under services → product:"mechanic", auto_create:false
+"I want to sell compost" → not in whitelist but clearly agriculture (fertilizer) → auto_create:true, product_type:"crop"
 """
 
         try:
@@ -111,7 +136,7 @@ Rules:
                     {"role": "user", "content": f"Classify this message: {text}"}
                 ],
                 temperature=0.1,
-                max_tokens=300,
+                max_tokens=400,
                 response_format={"type": "json_object"}
             )
 
@@ -125,40 +150,56 @@ Rules:
             if "entities" not in result:
                 result["entities"] = {}
 
-            # Add method indicator
+            # Ensure new fields have defaults
+            entities = result["entities"]
+            entities.setdefault("auto_create", False)
+            entities.setdefault("valid", True)
+            entities.setdefault("rejection_reason", None)
+            entities.setdefault("product_type", None)
+            entities.setdefault("default_measurement", None)
+
             result["method"] = "groq"
 
             return result
 
         except Exception as e:
             print(f"GROQ CLASSIFICATION ERROR: {e}")
-            # Fallback to unknown intent
             return {
                 "intent": "unknown",
                 "confidence": 0.0,
                 "method": "groq_error",
-                "entities": {},
-                "error": str(e)
+                "entities": {
+                    "auto_create": False,
+                    "valid": True,
+                    "rejection_reason": None,
+                    "product_type": None,
+                    "default_measurement": None,
+                },
+                "error": str(e),
             }
 
     def classify_with_fallback(self, text: str) -> dict:
-        """
-        Classify with fallback to keyword matching if Groq fails.
-        """
         result = self.classify(text)
 
-        # If Groq failed or confidence is very low, fallback
         if result["intent"] == "unknown" or result.get("confidence", 0) < 0.3:
             from intents.classifier import IntentClassifier
             fallback = IntentClassifier()
             fallback_result = fallback.classify(text)
 
-            # Merge entities from Groq with fallback intent
+            # Merge: take entities from Groq (rejected products still respected)
+            groq_entities = result.get("entities", {})
             return {
                 "intent": fallback_result["intent"],
                 "confidence": fallback_result["confidence"],
                 "method": f"fallback_{fallback_result['method']}",
-                "entities": result.get("entities", {})
+                "entities": {
+                    **groq_entities,
+                    "auto_create": False,
+                    "valid": True,
+                    "rejection_reason": None,
+                    "product_type": None,
+                    "default_measurement": None,
+                },
             }
 
         return result
@@ -180,7 +221,6 @@ Rules:
         print(f"User text: {text}")
         print(f"Listings count: {len(listings)}")
 
-        # Format listings for Groq
         listings_context = []
         for idx, listing in enumerate(listings, 1):
             listings_context.append({
@@ -190,11 +230,10 @@ Rules:
                 "quantity": listing[3],
                 "measurement": listing[4],
                 "price": listing[5],
-                "location": f"{listing[6] or 'Not specified'}, {listing[7]}"
+                "location": f"{listing[6] or 'Not specified'}, {listing[7]}",
             })
 
         context_str = json.dumps(listings_context, indent=2)
-        print(f"Listings context:\n{context_str}")
 
         prompt = f"""The user has viewed these listings:
 {context_str}
@@ -242,15 +281,12 @@ Rules:
 
             result = json.loads(response.choices[0].message.content)
 
-            # Validate listing_number
             listing_number = result.get("listing_number")
             if not listing_number or listing_number < 1 or listing_number > len(listings):
                 return {"status": "error", "message": f"Invalid listing number. Please choose between 1 and {len(listings)}."}
 
-            # Get actual listing_id
             listing_id = listings[listing_number - 1][0]
 
-            # Clean up updates
             updates = result.get("updates", {})
             cleaned_updates = {}
             if updates.get("price"):
@@ -270,7 +306,7 @@ Rules:
                 "status": "ok",
                 "listing_id": listing_id,
                 "listing_number": listing_number,
-                "updates": cleaned_updates
+                "updates": cleaned_updates,
             }
 
         except Exception as e:

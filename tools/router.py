@@ -216,6 +216,7 @@ class ToolRouter:
 
     def _create_listing(self, entities, user_id, image_url=None, text=""):
         from db.controller.userController import get_user_info
+        from db.controller.productController import create_product
 
         user = get_user_info(user_id)
         if not user:
@@ -224,12 +225,27 @@ class ToolRouter:
         if not user.is_farmer():
             return {"status": "error", "message": "Only farmers can create listings. To become a farmer, send: 'change my role to farmer in [your region]'"}
 
+        # Check if Groq rejected the product as non-agriculture
+        if entities.get("valid") is False:
+            reason = entities.get("rejection_reason", "This product is not supported on Moonso Link.")
+            return {"status": "error", "message": reason}
+
         if not entities.get("product"):
             return {"status": "error", "message": "What product do you want to sell?"}
         if not entities.get("quantity"):
             return {"status": "error", "message": "How much do you want to sell?"}
         if not entities.get("price"):
             return {"status": "error", "message": "What is your price in XAF?"}
+
+        product_name = entities.get("product")
+
+        # Auto-create product if it's not in the DB yet
+        if entities.get("auto_create"):
+            product_type = entities.get("product_type", "crop")
+            default_measurement = entities.get("default_measurement")
+            new_id = create_product(product_name, product_type, default_measurement)
+            if not new_id:
+                return {"status": "error", "message": f"Could not create product '{product_name}'. Please try again later."}
 
         compressed_image_url = image_url
         if image_url:
@@ -244,7 +260,7 @@ class ToolRouter:
 
         result = create_listing(
             user_id=user_id,
-            product_name=entities.get("product"),
+            product_name=product_name,
             quantity=entities.get("quantity"),
             measurement=entities.get("measurement"),
             price=entities.get("price"),
@@ -259,6 +275,9 @@ class ToolRouter:
 
         measurement = result.get("measurement", "kg")
         message = f"✅ Listing created! Your {result['quantity']}{measurement} of {result['product_name'].capitalize()} at {result['price']} XAF/{measurement}"
+
+        if entities.get("auto_create"):
+            message = f"🆕 New product '{product_name.capitalize()}' added to our catalog!\n\n" + message
 
         if result.get("missing_location"):
             message += (
