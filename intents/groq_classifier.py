@@ -171,7 +171,7 @@ Rules:
         Args:
             text: User message (e.g., "update the fourth one to price 200")
             listings: List of listings user has viewed, each with:
-                [id, user_id, crop_id, quantity_kg, price, town, region, origin, image_url, created_at, crop_name]
+                [id, user_id, product_id, quantity, measurement, price, town, region, origin, image_url, expires_at, created_at, updated_at, product_name]
 
         Returns:
             dict with keys: listing_id, updates
@@ -186,10 +186,11 @@ Rules:
             listings_context.append({
                 "number": idx,
                 "listing_id": listing[0],
-                "crop": listing[10] if len(listing) > 10 else "Unknown",
-                "quantity_kg": listing[3],
-                "price_per_kg": listing[4],
-                "location": f"{listing[5] or 'Not specified'}, {listing[6]}"
+                "product": listing[13] if len(listing) > 13 else "Unknown",
+                "quantity": listing[3],
+                "measurement": listing[4],
+                "price": listing[5],
+                "location": f"{listing[6] or 'Not specified'}, {listing[7]}"
             })
 
         context_str = json.dumps(listings_context, indent=2)
@@ -202,14 +203,15 @@ User message: "{text}"
 
 Determine:
 1. Which listing number (1-{len(listings)}) the user is referring to
-2. What updates they want to make (price, quantity, location, region, origin)
+2. What updates they want to make (price, quantity, measurement, location, region, origin)
 
 Respond with JSON:
 {{
     "listing_number": <number 1-{len(listings)}>,
     "updates": {{
         "price": <numeric value or null>,
-        "quantity": <numeric value in kg or null>,
+        "quantity": <numeric value or null>,
+        "measurement": <measurement unit or null>,
         "location": <town name or null>,
         "region": <region name or null>,
         "origin": <origin or null>
@@ -221,8 +223,9 @@ Rules:
 - For "first", "the first one", "#1" → listing_number: 1
 - Extract price from: "price of 200", "at 300", "to 150 XAF"
 - Extract quantity from: "200kg", "quantity 200", "quality 200"
+- Extract measurement from: "200kg" → "kg", "5 bags" → "bag", "2 hours" → "hour"
 - If user doesn't specify which listing and there's only one, use listing_number: 1
-- DO NOT confuse "price" with "rice" crop
+- DO NOT confuse "price" with "rice" product
 """
 
         try:
@@ -253,7 +256,9 @@ Rules:
             if updates.get("price"):
                 cleaned_updates["price"] = updates["price"]
             if updates.get("quantity"):
-                cleaned_updates["quantity_kg"] = updates["quantity"]
+                cleaned_updates["quantity"] = updates["quantity"]
+            if updates.get("measurement"):
+                cleaned_updates["measurement"] = updates["measurement"]
             if updates.get("location"):
                 cleaned_updates["town"] = updates["location"]
             if updates.get("region"):

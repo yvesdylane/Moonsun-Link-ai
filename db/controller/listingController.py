@@ -1,20 +1,32 @@
 from db.connect import conn
-from db.controller.cropController import get_crop_id
+from db.controller.productController import get_product_id, get_product_info
 from db.controller.userController import get_user_role
+from entities.vocabulary import TYPE_DEFAULT_MEASUREMENTS
 
 
-def create_listing(user_id, crop_name, quantity, price, town=None, region=None, origin=None, image_url=None):
+SERVICE_PRODUCT_TYPES = {"service"}
+
+
+def create_listing(user_id, product_name, quantity, price, measurement=None,
+                   town=None, region=None, origin=None, image_url=None):
     """
     Create a new listing.
 
-    If region not specified, uses user's profile region.
-    If origin not specified, uses same as region.
+    Auto-detects measurement from product info if not provided.
+    Services expire in 1 year, everything else in 1 month.
 
     Returns dict with listing_id and missing_location flag.
     """
-    crop_id = get_crop_id(crop_name)
-    if not crop_id:
-        return {"status": "error", "message": f"Crop '{crop_name}' not found"}
+    info = get_product_info(product_name)
+    if not info:
+        return {"status": "error", "message": f"Product '{product_name}' not found"}
+
+    product_id = info["id"]
+    product_type = info["type"]
+
+    # Auto-detect measurement
+    if not measurement:
+        measurement = info.get("default_measurement") or TYPE_DEFAULT_MEASUREMENTS.get(product_type, "kg")
 
     # Get user's region if not specified
     if not region:
@@ -26,13 +38,19 @@ def create_listing(user_id, crop_name, quantity, price, town=None, region=None, 
     if not origin:
         origin = region
 
+    # Determine expiry: services expire in 1 year
+    if product_type == "service":
+        expires_at = "NOW() + INTERVAL '1 year'"
+    else:
+        expires_at = "NOW() + INTERVAL '1 month'"
+
     cur = conn.cursor()
-    query = """
-        INSERT INTO listings (user_id, crop_id, quantity_kg, price, town, region, origin, image_url)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    query = f"""
+        INSERT INTO listings (user_id, product_id, quantity, measurement, price, town, region, origin, image_url, expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, {expires_at})
         RETURNING id
     """
-    cur.execute(query, (user_id, crop_id, quantity, price, town, region, origin, image_url))
+    cur.execute(query, (user_id, product_id, quantity, measurement, price, town, region, origin, image_url))
     listing_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
@@ -42,9 +60,10 @@ def create_listing(user_id, crop_name, quantity, price, town=None, region=None, 
         "listing_id": listing_id,
         "missing_location": town is None,
         "region": region,
-        "crop_name": crop_name,
+        "product_name": product_name,
         "quantity": quantity,
-        "price": price
+        "measurement": measurement,
+        "price": price,
     }
 
 
@@ -86,8 +105,11 @@ def update_listing(listing_id: int, user_id: str, updates: dict):
         return {"status": "error", "message": "Listing not found or not yours"}
     return {"status": "ok", "message": "Listing updated successfully"}
 
-def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_price=None, user_id=None, include_unverified=False, listing_id=None):
-    crop_id = get_crop_id(crop_name) if crop_name else None
+
+def get_listings(page=1, limit=10, product_name=None, town=None, region=None,
+                 max_price=None, user_id=None, include_unverified=False,
+                 listing_id=None, product_types=None):
+    product_id = get_product_id(product_name) if product_name else None
 
     filters = []
     values = []
@@ -95,14 +117,13 @@ def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_p
     if listing_id:
         filters.append("l.id = %s")
         values.append(listing_id)
-    if crop_id:
-        filters.append("l.crop_id = %s")
-        values.append(crop_id)
+    if product_id:
+        filters.append("l.product_id = %s")
+        values.append(product_id)
     if town:
         filters.append("l.town ILIKE %s")
         values.append(f"%{town}%")
     if region:
-        # Include both specific region AND General listings
         filters.append("(l.region = %s OR l.region = 'General')")
         values.append(region)
     if max_price:
@@ -112,30 +133,40 @@ def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_p
         filters.append("l.user_id = %s")
         values.append(user_id)
     else:
-        # Only show verified farmers' listings in public search
         if not include_unverified:
             filters.append("u.verified = 'true'")
+
+    # Product type filter: default to crops+animals for public search
+    if product_types is not None:
+        if len(product_types) == 1:
+            filters.append("p.type = %s")
+            values.append(product_types[0])
+        else:
+            placeholders = ",".join(["%s"] * len(product_types))
+            filters.append(f"p.type IN ({placeholders})")
+            values.extend(product_types)
+    elif not user_id and not product_id:
+        # Public search without a specific product: show crops + animals
+        filters.append("p.type IN ('crop', 'animal')")
 
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
     offset = (page - 1) * limit
 
     cur = conn.cursor()
 
-    # get total count
     cur.execute(f"""
-        SELECT COUNT(*) 
+        SELECT COUNT(*)
         FROM listings l
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         {where}
     """, values)
     total = cur.fetchone()[0]
 
-    # get page
     cur.execute(f"""
-        SELECT l.*, c.name as crop_name, u.name as seller_name
+        SELECT l.*, p.name as product_name, u.name as seller_name
         FROM listings l
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         {where}
         ORDER BY l.created_at DESC
@@ -151,52 +182,56 @@ def get_listings(page=1, limit=10, crop_name=None, town=None, region=None, max_p
         "listings": listings,
         "page": page,
         "total_pages": total_pages,
-        "total": total
+        "total": total,
     }
+
 
 def get_available_products() -> list:
     """
     Get list of distinct products currently being sold by verified farmers.
 
     Returns:
-        List of product names
+        List of product names (all types except services)
     """
     cur = conn.cursor()
     cur.execute("""
-        SELECT DISTINCT c.name
+        SELECT DISTINCT p.name
         FROM listings l
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         WHERE u.verified = 'true'
-        ORDER BY c.name
+          AND p.type != 'service'
+        ORDER BY p.name
     """)
     products = [row[0] for row in cur.fetchall()]
     cur.close()
     return products
 
-def get_product_locations(crop_name: str) -> dict:
+
+def get_product_locations(product_name: str) -> dict:
     """
     Get regions and towns where a specific product is being sold by verified farmers.
 
     Args:
-        crop_name: Name of the crop/product
+        product_name: Name of the product
 
     Returns:
         dict with status, product name, and location data
     """
-    crop_id = get_crop_id(crop_name)
-    if not crop_id:
-        return {"status": "error", "message": f"Product '{crop_name}' not recognized"}
+    info = get_product_info(product_name)
+    if not info:
+        return {"status": "error", "message": f"Product '{product_name}' not recognized"}
+
+    product_id = info["id"]
 
     cur = conn.cursor()
 
-    # Check if product exists in verified listings
     cur.execute("""
         SELECT COUNT(*)
         FROM listings l
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s AND u.verified = 'true'
-    """, (crop_id,))
+        WHERE l.product_id = %s AND u.verified = 'true'
+    """, (product_id,))
 
     count = cur.fetchone()[0]
 
@@ -204,23 +239,21 @@ def get_product_locations(crop_name: str) -> dict:
         cur.close()
         return {
             "status": "not_found",
-            "product": crop_name,
-            "message": f"No one is currently selling {crop_name}"
+            "product": product_name,
+            "message": f"No one is currently selling {product_name}",
         }
 
-    # Get regions and towns
     cur.execute("""
         SELECT DISTINCT l.region, l.town
         FROM listings l
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s AND u.verified = 'true'
+        WHERE l.product_id = %s AND u.verified = 'true'
         ORDER BY l.region, l.town
-    """, (crop_id,))
+    """, (product_id,))
 
     locations = cur.fetchall()
     cur.close()
 
-    # Organize by region
     regions_data = {}
     for region, town in locations:
         if region not in regions_data:
@@ -230,36 +263,38 @@ def get_product_locations(crop_name: str) -> dict:
 
     return {
         "status": "ok",
-        "product": crop_name,
+        "product": product_name,
         "count": count,
-        "regions": regions_data
+        "regions": regions_data,
     }
 
-def check_product_exists(crop_name: str, region: str = None, max_price: int = None) -> dict:
+
+def check_product_exists(product_name: str, region: str = None, max_price: int = None) -> dict:
     """
     Check if a product exists in verified listings and where it fails criteria.
 
     Args:
-        crop_name: Name of the crop/product
+        product_name: Name of the product
         region: Optional region filter
         max_price: Optional maximum price filter
 
     Returns:
         dict with existence status and alternative suggestions
     """
-    crop_id = get_crop_id(crop_name)
-    if not crop_id:
+    info = get_product_info(product_name)
+    if not info:
         return {"exists": False, "reason": "unknown_product"}
+
+    product_id = info["id"]
 
     cur = conn.cursor()
 
-    # Check if product exists at all in verified listings
     cur.execute("""
         SELECT COUNT(*)
         FROM listings l
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s AND u.verified = 'true'
-    """, (crop_id,))
+        WHERE l.product_id = %s AND u.verified = 'true'
+    """, (product_id,))
 
     total_count = cur.fetchone()[0]
 
@@ -267,9 +302,8 @@ def check_product_exists(crop_name: str, region: str = None, max_price: int = No
         cur.close()
         return {"exists": False, "reason": "not_listed"}
 
-    # Check with filters
-    filters = ["l.crop_id = %s", "u.verified = 'true'"]
-    values = [crop_id]
+    filters = ["l.product_id = %s", "u.verified = 'true'"]
+    values = [product_id]
 
     if region:
         filters.append("l.region = %s")
@@ -294,17 +328,15 @@ def check_product_exists(crop_name: str, region: str = None, max_price: int = No
         cur.close()
         return {"exists": True, "count": filtered_count}
 
-    # Product exists but doesn't match criteria - provide feedback
     feedback = {"exists": True, "matches_criteria": False, "total_listings": total_count}
 
-    # Check what's failing
     if region:
         cur.execute("""
             SELECT DISTINCT l.region
             FROM listings l
             JOIN users u ON l.user_id = u.id
-            WHERE l.crop_id = %s AND u.verified = 'true'
-        """, (crop_id,))
+            WHERE l.product_id = %s AND u.verified = 'true'
+        """, (product_id,))
         available_regions = [row[0] for row in cur.fetchall()]
         feedback["available_regions"] = available_regions
         feedback["searched_region"] = region
@@ -314,8 +346,8 @@ def check_product_exists(crop_name: str, region: str = None, max_price: int = No
             SELECT MIN(l.price)
             FROM listings l
             JOIN users u ON l.user_id = u.id
-            WHERE l.crop_id = %s AND u.verified = 'true'
-        """, (crop_id,))
+            WHERE l.product_id = %s AND u.verified = 'true'
+        """, (product_id,))
         min_price = cur.fetchone()[0]
         feedback["min_price"] = min_price
         feedback["max_price_searched"] = max_price
@@ -323,37 +355,38 @@ def check_product_exists(crop_name: str, region: str = None, max_price: int = No
     cur.close()
     return feedback
 
-def search_by_price(crop_name: str, target_price: int, tolerance_percent: float = 15.0) -> dict:
+
+def search_by_price(product_name: str, target_price: int, tolerance_percent: float = 15.0) -> dict:
     """
     Search for listings at or near a specific price point.
 
     Args:
-        crop_name: Name of the crop/product
-        target_price: Desired price per kg
+        product_name: Name of the product
+        target_price: Desired price per unit
         tolerance_percent: Price tolerance as percentage (default: 15%)
 
     Returns:
         dict with exact matches or nearest alternatives
     """
-    from db.controller.cropController import get_crop_id
+    from db.controller.productController import get_product_id, get_product_info
     from utils.price_helper import calculate_price_range
 
-    crop_id = get_crop_id(crop_name)
-    if not crop_id:
-        return {"status": "error", "message": f"Product '{crop_name}' not recognized"}
+    info = get_product_info(product_name)
+    if not info:
+        return {"status": "error", "message": f"Product '{product_name}' not recognized"}
 
-    # Calculate price range with percentage tolerance
+    product_id = info["id"]
+
     min_price, max_price = calculate_price_range(target_price, tolerance_percent)
 
     cur = conn.cursor()
 
-    # Check if product exists at all
     cur.execute("""
         SELECT COUNT(*)
         FROM listings l
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s AND u.verified = 'true'
-    """, (crop_id,))
+        WHERE l.product_id = %s AND u.verified = 'true'
+    """, (product_id,))
 
     total_count = cur.fetchone()[0]
 
@@ -361,22 +394,21 @@ def search_by_price(crop_name: str, target_price: int, tolerance_percent: float 
         cur.close()
         return {
             "status": "not_found",
-            "message": f"No one is currently selling {crop_name}"
+            "message": f"No one is currently selling {product_name}",
         }
 
-    # Search for exact or close matches
     cur.execute("""
-        SELECT l.*, c.name as crop_name, u.name as seller_name,
+        SELECT l.*, p.name as product_name, u.name as seller_name,
                ABS(l.price - %s) as price_diff
         FROM listings l
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s
+        WHERE l.product_id = %s
           AND u.verified = 'true'
           AND l.price BETWEEN %s AND %s
         ORDER BY price_diff ASC, l.created_at DESC
         LIMIT 10
-    """, (target_price, crop_id, min_price, max_price))
+    """, (target_price, product_id, min_price, max_price))
 
     close_matches = cur.fetchall()
 
@@ -389,19 +421,18 @@ def search_by_price(crop_name: str, target_price: int, tolerance_percent: float 
             "tolerance_percent": tolerance_percent,
             "price_range": (min_price, max_price),
             "listings": close_matches,
-            "message": f"Found {len(close_matches)} listing(s) near {target_price} XAF"
+            "message": f"Found {len(close_matches)} listing(s) near {target_price} XAF",
         }
 
-    # No close matches - find nearest alternatives
     cur.execute("""
         SELECT l.price, COUNT(*) as count
         FROM listings l
         JOIN users u ON l.user_id = u.id
-        WHERE l.crop_id = %s AND u.verified = 'true'
+        WHERE l.product_id = %s AND u.verified = 'true'
         GROUP BY l.price
         ORDER BY ABS(l.price - %s) ASC
         LIMIT 3
-    """, (crop_id, target_price))
+    """, (product_id, target_price))
 
     nearest_prices = cur.fetchall()
     cur.close()
@@ -410,5 +441,5 @@ def search_by_price(crop_name: str, target_price: int, tolerance_percent: float 
         "status": "alternatives",
         "target_price": target_price,
         "nearest_prices": [{"price": row[0], "count": row[1]} for row in nearest_prices],
-        "message": f"No listings at {target_price} XAF, but here are the nearest prices"
+        "message": f"No listings at {target_price} XAF, but here are the nearest prices",
     }

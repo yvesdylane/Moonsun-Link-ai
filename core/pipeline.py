@@ -24,6 +24,7 @@ class AssistantPipeline:
         entities = {
             "product": groq_entities.get("product") or regex_entities.get("product"),
             "quantity": groq_entities.get("quantity") or regex_entities.get("quantity"),
+            "measurement": groq_entities.get("measurement") or regex_entities.get("measurement"),
             "price": groq_entities.get("price") or regex_entities.get("price"),
             "location": groq_entities.get("location") or regex_entities.get("location"),
             "region": groq_entities.get("region") or regex_entities.get("region"),

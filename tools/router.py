@@ -18,7 +18,6 @@ class ToolRouter:
             print(f"UNHANDLED ERROR IN ROUTER: {e}")
             traceback.print_exc()
             print("=" * 60)
-            # Rollback transaction to prevent cascade failures
             from db.connect import conn
             try:
                 conn.rollback()
@@ -88,17 +87,12 @@ class ToolRouter:
                     result["language"] = state["context"].get("language", "en")
                     return result
                 if new_pipeline:
-                    # Don't clear state for intents that need listing context
                     intent = new_pipeline["intent"]["intent"]
                     if intent in ("update_listing", "delete_listing", "show_interest", "view_listing_image"):
-                        # Context-aware intents - fall through to handler with state
                         pass
                     else:
-                        # Other intents clear the browsing state and process normally
                         clear_state(user_id)
-                        # Fall through to normal handler - don't return error
                 elif not new_pipeline:
-                    # No navigation command and no new intent - show error
                     return {
                         "status": "error",
                         "message": "Reply 'next' or 'previous' to browse pages, or send a new request."
@@ -134,28 +128,21 @@ class ToolRouter:
 
             # ── awaiting_location ──────────────────────────────────────
             if state["state"] == "awaiting_location":
-                # Check if user wants to do something else (only high-confidence, clear intents)
                 if new_pipeline:
                     intent = new_pipeline["intent"]["intent"]
                     confidence = new_pipeline["intent"]["confidence"]
-
-                    # Only clear state for very explicit intents (not ambiguous transcriptions)
                     explicit_intents = [
                         "greeting", "get_my_listings", "search_listings",
                         "get_my_info", "show_available_products", "get_crop_price",
                         "get_all_crop_prices", "get_my_interests", "view_listing_interests"
                     ]
-
                     if intent in explicit_intents and confidence > 0.7:
                         clear_state(user_id)
-                        # Fall through to normal handler
                     else:
-                        # Ambiguous or low confidence - treat as town name
                         result = self._handle_location_input(text, user_id, state["context"])
                         result["language"] = "en"
                         return result
                 else:
-                    # Treat as town name
                     result = self._handle_location_input(text, user_id, state["context"])
                     result["language"] = "en"
                     return result
@@ -190,14 +177,12 @@ class ToolRouter:
         }
 
         handler = routes.get(intent, self._unknown)
-        # Pass original text for context-aware operations
         result = handler(entities, user_id, image_url, text)
         result["language"] = language
         return result
 
     def _greeting(self, entities, user_id, image_url=None, text=""):
         from db.controller.userController import get_user_info
-
         user = get_user_info(user_id)
 
         if user and user.is_buyer():
@@ -240,13 +225,12 @@ class ToolRouter:
             return {"status": "error", "message": "Only farmers can create listings. To become a farmer, send: 'change my role to farmer in [your region]'"}
 
         if not entities.get("product"):
-            return {"status": "error", "message": "What crop do you want to sell?"}
+            return {"status": "error", "message": "What product do you want to sell?"}
         if not entities.get("quantity"):
-            return {"status": "error", "message": "How many kg do you want to sell?"}
+            return {"status": "error", "message": "How much do you want to sell?"}
         if not entities.get("price"):
-            return {"status": "error", "message": "What is your price per kg in XAF?"}
+            return {"status": "error", "message": "What is your price in XAF?"}
 
-        # Compress image if provided
         compressed_image_url = image_url
         if image_url:
             from utils.image_compressor import compress_image
@@ -260,56 +244,51 @@ class ToolRouter:
 
         result = create_listing(
             user_id=user_id,
-            crop_name=entities.get("product"),
+            product_name=entities.get("product"),
             quantity=entities.get("quantity"),
+            measurement=entities.get("measurement"),
             price=entities.get("price"),
             town=entities.get("location"),
-            region=entities.get("region"),  # Will use user's region if None
+            region=entities.get("region"),
             origin=entities.get("region"),
-            image_url=compressed_image_url
+            image_url=compressed_image_url,
         )
 
         if result["status"] == "error":
             return result
 
-        # Build success message
-        message = f"✅ Listing created! Your {result['quantity']}kg of {result['crop_name'].capitalize()} at {result['price']} XAF/kg"
+        measurement = result.get("measurement", "kg")
+        message = f"✅ Listing created! Your {result['quantity']}{measurement} of {result['product_name'].capitalize()} at {result['price']} XAF/{measurement}"
 
-        # If location missing, prompt for it
         if result.get("missing_location"):
             message += (
                 f"\n\n⚠️ Location not specified - Buyers prefer to know where products are sold.\n\n"
                 f"Send the town name (e.g., 'Yaoundé', 'Douala') to add location, or send another command to skip."
             )
-
-            # Enter awaiting_location state
             set_state(user_id, "awaiting_location", {
                 "listing_id": result["listing_id"],
-                "crop_name": result["crop_name"],
+                "product_name": result["product_name"],
                 "quantity": result["quantity"],
+                "measurement": measurement,
                 "price": result["price"],
-                "region": result["region"]
+                "region": result["region"],
             })
 
-        # Warn unverified farmers
         if not user.is_verified():
             message += (
                 "\n\n⚠️ *Note:* Your listings won't be visible to buyers until you verify your account.\n\n"
                 "To verify, send: 'verify my account'"
             )
 
-        return {
-            "status": "ok",
-            "message": message
-        }
+        return {"status": "ok", "message": message}
 
     def _search_listings(self, entities, user_id, image_url=None, text=""):
         from db.controller.listingController import check_product_exists
-        from db.controller.cropPriceController import get_market_price_for_listing_search
+        from db.controller.productPriceController import get_market_price_for_listing_search
         from utils.formatter import format_market_price_header
 
         filters = {
-            "crop_name": entities.get("product"),
+            "product_name": entities.get("product"),
             "town": entities.get("location"),
             "region": entities.get("region"),
             "max_price": entities.get("price"),
@@ -317,31 +296,28 @@ class ToolRouter:
 
         result = get_listings(page=1, **filters)
 
-        # Get market price header if crop is specified
         market_price_header = None
         if entities.get("product"):
             market_price = get_market_price_for_listing_search(
-                crop_name=entities.get("product"),
-                region=entities.get("region")
+                product_name=entities.get("product"),
+                region=entities.get("region"),
             )
-            if market_price["has_data"]:
+            if market_price:
                 market_price_header = format_market_price_header(
-                    market_price["crop_name"],
-                    market_price["avg_price"],
-                    market_price["scope"],
-                    market_price.get("region")
+                    market_price["product_name"],
+                    market_price.get("avg_price") or market_price.get("overall_avg"),
+                    "regional" if market_price.get("region") else "overall",
+                    market_price.get("region"),
                 )
 
-        # Store listing IDs and details in state for interest tracking
         if result["total"] > 0:
             from datetime import datetime
             listing_ids = [str(listing[0]) for listing in result["listings"]]
-            # Convert UUIDs and datetimes to strings for JSON serialization
             listings_details = []
             for listing in result["listings"]:
                 serializable_listing = []
                 for x in listing:
-                    if hasattr(x, 'hex'):  # UUID
+                    if hasattr(x, 'hex'):
                         serializable_listing.append(str(x))
                     elif isinstance(x, datetime):
                         serializable_listing.append(x.isoformat())
@@ -353,15 +329,14 @@ class ToolRouter:
                 "listings_details": listings_details,
                 "filters": filters,
                 "page": 1,
-                "show_seller": True
+                "show_seller": True,
             })
 
-        # If no results and product was specified, provide helpful feedback
         if result["total"] == 0 and entities.get("product"):
             check_result = check_product_exists(
-                crop_name=entities.get("product"),
+                product_name=entities.get("product"),
                 region=entities.get("region"),
-                max_price=entities.get("price")
+                max_price=entities.get("price"),
             )
 
             if not check_result["exists"]:
@@ -372,7 +347,6 @@ class ToolRouter:
                     }
 
             elif not check_result.get("matches_criteria", True):
-                # Product exists but doesn't match criteria
                 feedback_parts = [f"⚠️ {entities.get('product').capitalize()} is listed but doesn't match your criteria:"]
 
                 if "available_regions" in check_result:
@@ -386,33 +360,24 @@ class ToolRouter:
 
                 feedback_parts.append(f"\n\nTo see all {entities.get('product')} listings, send: 'Find {entities.get('product')}'")
 
-                return {
-                    "status": "ok",
-                    "message": "".join(feedback_parts)
-                }
+                return {"status": "ok", "message": "".join(feedback_parts)}
 
-        # Already set state above if listings exist
         return_data = {"status": "ok", "data": result, "show_seller": True}
         if market_price_header:
             return_data["market_price_header"] = market_price_header
-            # Also pass market average for price indicators
-            if market_price["has_data"]:
-                return_data["market_avg"] = market_price["avg_price"]
         return return_data
 
     def _get_my_listings(self, entities, user_id, image_url=None, text=""):
         from datetime import datetime
-        filters = {"crop_name": entities.get("product"), "user_id": user_id, "include_unverified": True}
+        filters = {"product_name": entities.get("product"), "user_id": user_id, "include_unverified": True}
         result = get_listings(page=1, **filters)
         listing_ids = [str(listing[0]) for listing in result["listings"]] if result["total"] > 0 else []
-        # Store full listing details for context-aware operations (convert UUIDs and datetimes to strings)
         listings_details = []
         if result["total"] > 0:
             for listing in result["listings"]:
-                # Convert UUID and datetime objects to strings
                 serializable_listing = []
                 for x in listing:
-                    if hasattr(x, 'hex'):  # UUID
+                    if hasattr(x, 'hex'):
                         serializable_listing.append(str(x))
                     elif isinstance(x, datetime):
                         serializable_listing.append(x.isoformat())
@@ -424,39 +389,31 @@ class ToolRouter:
             "listings_details": listings_details,
             "filters": filters,
             "page": 1,
-            "show_seller": False
+            "show_seller": False,
         })
         return {"status": "ok", "data": result, "show_seller": False}
 
     def _browse_page(self, user_id: str, context: dict, direction: int) -> dict:
         page = context["page"] + direction
 
-        # Validate page number
         if page < 1:
-            return {
-                "status": "error",
-                "message": "You're already on the first page."
-            }
+            return {"status": "error", "message": "You're already on the first page."}
 
         filters = context["filters"]
         result = get_listings(page=page, **filters)
 
         if page > result["total_pages"]:
-            return {
-                "status": "error",
-                "message": f"No more pages. Total pages: {result['total_pages']}"
-            }
+            return {"status": "error", "message": f"No more pages. Total pages: {result['total_pages']}"}
 
-        # Update state with new page
         context["page"] = page
         set_state(user_id, "browsing_listings", context)
         return {"status": "ok", "data": result}
 
     def _delete_listing(self, entities, user_id, image_url=None, text=""):
         if not entities.get("product"):
-            return {"status": "error", "message": "Which crop listing do you want to delete?"}
+            return {"status": "error", "message": "Which product listing do you want to delete?"}
 
-        result = get_listings(crop_name=entities.get("product"), user_id=user_id, include_unverified=True)
+        result = get_listings(product_name=entities.get("product"), user_id=user_id, include_unverified=True)
         listings = result["listings"]
 
         if not listings:
@@ -466,12 +423,13 @@ class ToolRouter:
             clear_state(user_id)
             return delete_listing(listing_id=listings[0][0], user_id=user_id)
 
+        # l[3]=quantity, l[4]=measurement, l[5]=price
         options = "\n".join([
-            f"{i+1}) {l[3]}kg at {l[4]} XAF"
+            f"{i+1}) {l[3]}{l[4] or 'kg'} at {l[5]} XAF"
             for i, l in enumerate(listings)
         ])
         set_state(user_id, "awaiting_delete_choice", {
-            "listings": [[l[0], l[3], l[4]] for l in listings]
+            "listings": [[l[0], l[3], l[4], l[5]] for l in listings]
         })
         return {"status": "ok", "message": f"Which listing do you want to delete?\n{options}"}
 
@@ -490,19 +448,9 @@ class ToolRouter:
     def _update_listing(self, entities, user_id, image_url=None, text=""):
         state = get_state(user_id)
 
-        print(f"=== UPDATE_LISTING DEBUG ===")
-        print(f"State exists: {state is not None}")
-        if state:
-            print(f"State: {state.get('state')}")
-            print(f"Context keys: {state.get('context', {}).keys()}")
-            print(f"Has listings_details: {'listings_details' in state.get('context', {})}")
-
-        # Check if user has listings context from recent viewing
         if state and "listings_details" in state.get("context", {}):
             listings_details = state["context"]["listings_details"]
-            print(f"Using context-aware resolution with {len(listings_details)} listings")
 
-            # Use context-aware resolution with Groq
             from intents.groq_classifier import GroqIntentClassifier
             classifier = GroqIntentClassifier()
 
@@ -523,13 +471,11 @@ class ToolRouter:
                 if update_result["status"] == "error":
                     return update_result
                 return self._listing_preview(listing_id, user_id)
-            # If resolution failed, fall through to old method
 
-        # Fallback: old method without context
         if not entities.get("product"):
-            return {"status": "error", "message": "Which crop listing do you want to update?"}
+            return {"status": "error", "message": "Which product listing do you want to update?"}
 
-        result = get_listings(crop_name=entities.get("product"), user_id=user_id, include_unverified=True)
+        result = get_listings(product_name=entities.get("product"), user_id=user_id, include_unverified=True)
         listings = result["listings"]
 
         if not listings:
@@ -539,7 +485,9 @@ class ToolRouter:
         if entities.get("price"):
             updates["price"] = entities.get("price")
         if entities.get("quantity"):
-            updates["quantity_kg"] = entities.get("quantity")
+            updates["quantity"] = entities.get("quantity")
+        if entities.get("measurement"):
+            updates["measurement"] = entities.get("measurement")
         if entities.get("location"):
             updates["town"] = entities.get("location")
         if entities.get("region"):
@@ -560,13 +508,14 @@ class ToolRouter:
                 return update_result
             return self._listing_preview(listings[0][0], user_id)
 
+        # l[3]=quantity, l[4]=measurement, l[5]=price
         options = "\n".join([
-            f"{i + 1}) {l[3]}kg at {l[4]} XAF"
+            f"{i+1}) {l[3]}{l[4] or 'kg'} at {l[5]} XAF"
             for i, l in enumerate(listings)
         ])
         set_state(user_id, "awaiting_update_choice", {
-            "listings": [[l[0], l[3], l[4]] for l in listings],
-            "updates": updates
+            "listings": [[l[0], l[3], l[4], l[5]] for l in listings],
+            "updates": updates,
         })
         return {"status": "ok", "message": f"Which listing do you want to update?\n{options}"}
 
@@ -593,7 +542,6 @@ class ToolRouter:
                 "message": "📸 Please send a photo of yourself (selfie).\n\nJust send the image directly - no need to caption it.\n\nAccepted formats: JPEG, PNG, PDF (max 2MB)"
             }
 
-        # Store selfie URL in state context (will overwrite if resent)
         state = get_state(user_id)
         context = state.get("context", {}) if state else {}
         context["selfie_url"] = image_url
@@ -608,7 +556,6 @@ class ToolRouter:
     def _handle_verification_id(self, user_id: str, image_url: str) -> dict:
         from db.controller.userController import submit_verification_files
         from utils.verification_uploader import upload_verification_file
-        from utils.audio_downloader import download_attachment
         import tempfile
         import requests
 
@@ -625,16 +572,13 @@ class ToolRouter:
 
         selfie_url = state["context"]["selfie_url"]
 
-        # Download and upload selfie to correct location
         try:
-            # Download selfie from Cloudinary (currently in wrong location)
             selfie_response = requests.get(selfie_url)
             suffix_selfie = "." + selfie_url.rsplit(".", 1)[-1].split("?")[0]
             tmp_selfie = tempfile.NamedTemporaryFile(suffix=suffix_selfie, delete=False)
             tmp_selfie.write(selfie_response.content)
             tmp_selfie.close()
 
-            # Upload to correct location
             selfie_upload = upload_verification_file(tmp_selfie.name, user_id, "selfie")
             import os
             os.unlink(tmp_selfie.name)
@@ -643,14 +587,12 @@ class ToolRouter:
                 clear_state(user_id)
                 return selfie_upload
 
-            # Download and upload ID
             id_response = requests.get(image_url)
             suffix_id = "." + image_url.rsplit(".", 1)[-1].split("?")[0]
             tmp_id = tempfile.NamedTemporaryFile(suffix=suffix_id, delete=False)
             tmp_id.write(id_response.content)
             tmp_id.close()
 
-            # Upload ID to correct location
             id_upload = upload_verification_file(tmp_id.name, user_id, "id")
             os.unlink(tmp_id.name)
 
@@ -660,27 +602,22 @@ class ToolRouter:
 
             clear_state(user_id)
 
-            # Submit both files for verification (sets status to pending)
             result = submit_verification_files(user_id, selfie_upload["url"], id_upload["url"])
             return result
 
         except Exception as e:
             clear_state(user_id)
             print(f"VERIFICATION FILE PROCESSING ERROR: {e}")
-            return {
-                "status": "error",
-                "message": "Failed to process verification files. Please try again."
-            }
+            return {"status": "error", "message": "Failed to process verification files. Please try again."}
 
     def _listing_preview(self, listing_id: int, user_id: str) -> dict:
         result = get_listings(page=1, limit=1, user_id=user_id)
-        # find the specific listing by id
         listing = next((l for l in result["listings"] if l[0] == listing_id), None)
         if listing:
             return {
                 "status": "ok",
                 "message": f"✅ Listing updated! Here is how it looks to buyers:\n\n{format_listing_item(listing, show_seller=False)}",
-                "preview_image": listing[8],
+                "preview_image": listing[9],
             }
         return {"status": "ok", "message": "✅ Listing updated successfully"}
 
@@ -719,13 +656,11 @@ class ToolRouter:
                 "message": "Verification is only required for farmers. To become a farmer, send: 'change my role to farmer in [your region]'"
             }
 
-        # Check current verification status
         status_result = check_verification_status(user_id)
 
         if user.is_verified():
             return status_result
 
-        # Start verification process
         set_state(user_id, "awaiting_verification_selfie", {})
         return {
             "status": "ok",
@@ -742,14 +677,11 @@ class ToolRouter:
         if user.is_farmer():
             return {"status": "error", "message": "You are already a farmer. To change your region, send: 'update my region to [region name]'"}
 
-        # Check if user provided a region in this message
         region = entities.get("region")
 
         if not region:
-            # Use existing region from profile
             region = user.region if user.region else "General"
 
-        # If region is "General", ask them to update it first (set state)
         if region == "General":
             set_state(user_id, "awaiting_region_for_role_change", {})
             return {
@@ -765,10 +697,8 @@ class ToolRouter:
                 )
             }
 
-        # Change role with specified region
         result = change_role_to_farmer(user_id, region)
 
-        # Add verification reminder if successful
         if result["status"] == "ok" and not user.is_verified():
             result["message"] += (
                 "\n\n⚠️ *Verification Required*\n\n"
@@ -794,15 +724,12 @@ class ToolRouter:
                 "message": "What would you like to update?\n\nYou can update:\n- Your name\n- Your region"
             }
 
-        # Update profile
         result = update_user_info(user_id, updates)
 
-        # Check if user was in the middle of changing role to farmer
         state = get_state(user_id)
         if state and state["state"] == "awaiting_region_for_role_change" and updates.get("region"):
             clear_state(user_id)
 
-            # Now change role to farmer with the new region
             role_result = change_role_to_farmer(user_id, updates["region"])
 
             if role_result["status"] == "ok":
@@ -860,7 +787,6 @@ class ToolRouter:
         if result["status"] == "error":
             return result
 
-        # Format locations by region
         regions_text = []
         for region, towns in result["regions"].items():
             if towns:
@@ -881,10 +807,7 @@ class ToolRouter:
         from db.controller.listingInterestController import save_interest
         from db.controller.userController import get_user_info
         from utils.whatsapp import send_whatsapp_reply
-        import re
 
-        # Parse listing number and quantity from text
-        # Expected: "interested in 40kg of listing 5" or "i want listing 3"
         state = get_state(user_id)
 
         if not state or "listing_ids" not in state.get("context", {}):
@@ -895,9 +818,8 @@ class ToolRouter:
 
         listing_ids = state["context"]["listing_ids"]
 
-        # Extract listing number from entities or text
         listing_number = entities.get("listing_number")
-        quantity = entities.get("quantity") or 1  # Default to 1kg if not specified
+        quantity = entities.get("quantity") or 1
 
         if not listing_number:
             return {
@@ -905,7 +827,6 @@ class ToolRouter:
                 "message": "Which listing are you interested in?\n\nExample: 'I'm interested in 40kg of listing #2'"
             }
 
-        # Validate listing number
         try:
             listing_index = int(listing_number) - 1
             if listing_index < 0 or listing_index >= len(listing_ids):
@@ -921,7 +842,6 @@ class ToolRouter:
 
         listing_id = listing_ids[listing_index]
 
-        # Save interest (quantity is optional)
         result = save_interest(listing_id, user_id, quantity if quantity and quantity > 1 else None)
 
         if result["status"] == "error":
@@ -933,37 +853,36 @@ class ToolRouter:
 
         clear_state(user_id)
 
-        # Build buyer confirmation message
-        quantity_text = f"{quantity}kg of " if quantity and quantity > 1 else ""
+        measurement_text = f"{listing.get('measurement', 'kg')}" if listing.get('measurement') else ""
+        quantity_text = f"{quantity}{measurement_text} of " if quantity and quantity > 1 else ""
         buyer_message = (
             f"✅ Interest registered!\n\n"
-            f"You're interested in {quantity_text}{listing['crop_name'].capitalize()}\n"
-            f"💰 Price: {listing['price']} XAF/kg\n"
+            f"You're interested in {quantity_text}{listing['product_name'].capitalize()}\n"
+            f"💰 Price: {listing['price']} XAF/{measurement_text if measurement_text else 'kg'}\n"
             f"👤 Farmer: {listing['seller_name']}\n\n"
             f"The farmer has been notified and will contact you at {buyer['phone']} if interested."
         )
 
-        # Build seller notification (for both platforms)
         seller_notification = None
         if seller_notif.get("seller_whatsapp_chat_id") or seller_notif.get("seller_telegram_id"):
-            quantity_text = f"📦 Quantity: {seller_notif['quantity']}kg\n" if seller_notif.get('quantity') else ""
+            quantity_text = f"📦 Quantity: {seller_notif['quantity']}{measurement_text}\n" if seller_notif.get('quantity') else ""
             seller_notification = {
                 "whatsapp_chat_id": seller_notif.get("seller_whatsapp_chat_id"),
                 "telegram_id": seller_notif.get("seller_telegram_id"),
                 "message": (
                     f"🔔 *New Interest in Your Listing!*\n\n"
-                    f"🌾 Product: {seller_notif['crop_name'].capitalize()}\n"
+                    f"🌾 Product: {seller_notif['product_name'].capitalize()}\n"
                     f"{quantity_text}"
                     f"👤 Buyer: {seller_notif['buyer_name']}\n"
                     f"📞 Contact: {seller_notif['buyer_phone']}\n\n"
                     f"Contact them to complete the sale!"
-                )
+                ),
             }
 
         return {
             "status": "ok",
             "message": buyer_message,
-            "seller_notification": seller_notification
+            "seller_notification": seller_notification,
         }
 
     def _view_listing_interests(self, entities, user_id, image_url=None, text=""):
@@ -977,38 +896,30 @@ class ToolRouter:
                 "message": "Only farmers can view interests on their listings."
             }
 
-        crop_name = entities.get("product")
-        result = get_listing_interests(user_id, crop_name)
+        product_name = entities.get("product")
+        result = get_listing_interests(user_id, product_name)
 
         if result["total"] == 0:
-            return {
-                "status": "ok",
-                "message": result["message"]
-            }
+            return {"status": "ok", "message": result["message"]}
 
-        # Format interests
         lines = [f"👥 *Interests on Your Listings* ({result['total']} total)\n"]
 
         for listing_id, data in result["listings"].items():
-            lines.append(f"🌾 *{data['crop_name'].capitalize()}* - {data['quantity_kg']}kg at {data['price']} XAF/kg")
+            lines.append(f"🌾 *{data['product_name'].capitalize()}* - {data['quantity']}{data.get('measurement', 'kg')} at {data['price']} XAF")
 
             for interest in data["interests"]:
                 lines.append(f"  • {interest['buyer_name']} ({interest['buyer_phone']})")
-                # Only show quantity if specified
                 if interest['quantity']:
-                    lines.append(f"    Wants: {interest['quantity']}kg")
+                    lines.append(f"    Wants: {interest['quantity']}")
                 if interest.get("message"):
                     lines.append(f"    Message: {interest['message']}")
                 lines.append("")
 
-        return {
-            "status": "ok",
-            "message": "\n".join(lines)
-        }
+        return {"status": "ok", "message": "\n".join(lines)}
 
     def _search_by_price(self, entities, user_id, image_url=None, text=""):
         from db.controller.listingController import search_by_price
-        from db.controller.cropPriceController import get_market_price_for_listing_search
+        from db.controller.productPriceController import get_market_price_for_listing_search
         from utils.formatter import format_market_price_header
 
         product = entities.get("product")
@@ -1029,40 +940,34 @@ class ToolRouter:
         result = search_by_price(product, price)
 
         if result["status"] == "not_found":
-            return {
-                "status": "ok",
-                "message": result["message"]
-            }
+            return {"status": "ok", "message": result["message"]}
 
         if result["status"] == "ok":
-            # Get market price for context
             market_price_header = None
-            market_price = get_market_price_for_listing_search(crop_name=product)
-            if market_price["has_data"]:
+            market_price = get_market_price_for_listing_search(product_name=product)
+            if market_price:
                 market_price_header = format_market_price_header(
-                    market_price["crop_name"],
-                    market_price["avg_price"],
-                    market_price["scope"]
+                    market_price["product_name"],
+                    market_price.get("avg_price") or market_price.get("overall_avg"),
+                    "overall",
                 )
 
-            # Found close matches
             listing_ids = [listing[0] for listing in result["listings"]]
             set_state(user_id, "viewing_listings", {
                 "listing_ids": listing_ids,
                 "page": 1,
-                "show_seller": True
+                "show_seller": True,
             })
 
             listings_data = {
                 "listings": result["listings"],
                 "page": 1,
                 "total_pages": 1,
-                "total": len(result["listings"])
+                "total": len(result["listings"]),
             }
 
-            # Build message prefix with price range
             min_p, max_p = result["price_range"]
-            message_prefix = f"🔍 Showing listings near {price} XAF/kg (±15% = {min_p}-{max_p})\n\n"
+            message_prefix = f"🔍 Showing listings near {price} XAF (±15% = {min_p}-{max_p})\n\n"
             if market_price_header:
                 message_prefix = market_price_header + message_prefix
 
@@ -1070,15 +975,11 @@ class ToolRouter:
                 "status": "ok",
                 "data": listings_data,
                 "show_seller": True,
-                "message_prefix": message_prefix
+                "message_prefix": message_prefix,
             }
-            # Pass market average for price indicators
-            if market_price["has_data"]:
-                result_data["market_avg"] = market_price["avg_price"]
             return result_data
 
         if result["status"] == "alternatives":
-            # Show nearest prices
             nearest_text = "\n".join([
                 f"• {p['price']} XAF ({p['count']} listing{'s' if p['count'] > 1 else ''})"
                 for p in result["nearest_prices"]
@@ -1129,9 +1030,9 @@ class ToolRouter:
 
         cur = conn.cursor()
         cur.execute("""
-            SELECT l.image_url, c.name
+            SELECT l.image_url, p.name
             FROM listings l
-            JOIN crops c ON l.crop_id = c.id
+            JOIN products p ON l.product_id = p.id
             WHERE l.id = %s
         """, (listing_id,))
         row = cur.fetchone()
@@ -1147,11 +1048,11 @@ class ToolRouter:
                 "message": f"No photo available for listing #{listing_number}."
             }
 
-        crop_name = row[1].capitalize()
+        product_name = row[1].capitalize()
         return {
             "status": "ok",
-            "message": f"📸 #{listing_number} {crop_name}",
-            "preview_image": image
+            "message": f"📸 #{listing_number} {product_name}",
+            "preview_image": image,
         }
 
     def _get_my_interests(self, entities, user_id, image_url=None, text=""):
@@ -1163,14 +1064,13 @@ class ToolRouter:
         if result["total"] == 0:
             return {"status": "ok", "message": result["message"]}
 
-        # Format interests
         lines = [f"💚 *Your Interests* ({result['total']} active)\n"]
 
         for idx, interest in enumerate(result["interests"], 1):
-            quantity_text = f" - {interest['interested_quantity']}kg" if interest.get('interested_quantity') else ""
+            quantity_text = f" - {interest['interested_quantity']}" if interest.get('interested_quantity') else ""
             lines.append(
-                f"#{idx} 🌾 {interest['crop_name'].capitalize()}{quantity_text}\n"
-                f"   💰 {interest['price']} XAF/kg\n"
+                f"#{idx} 🌾 {interest['product_name'].capitalize()}{quantity_text}\n"
+                f"   💰 {interest['price']} XAF\n"
                 f"   👤 Farmer: {interest['seller_name']}\n"
                 f"   🆔 Interest ID: {interest['interest_id']}\n"
             )
@@ -1183,7 +1083,6 @@ class ToolRouter:
         """Cancel an interest (buyer cancels)."""
         from db.controller.listingInterestController import cancel_interest
 
-        # Extract interest_id from entities or text
         interest_id = entities.get("interest_id")
 
         if not interest_id:
@@ -1194,17 +1093,16 @@ class ToolRouter:
 
         result = cancel_interest(interest_id, user_id)
 
-        # Send notification to farmer if available
         if result.get("farmer_notification") and result["farmer_notification"].get("farmer_chat_id"):
             farmer_notif = result["farmer_notification"]
             notification = {
                 "chat_id": farmer_notif["farmer_chat_id"],
                 "message": (
                     f"❌ Interest Cancelled\n\n"
-                    f"🌾 Product: {farmer_notif['crop_name'].capitalize()}\n"
+                    f"🌾 Product: {farmer_notif['product_name'].capitalize()}\n"
                     f"👤 Buyer: {farmer_notif['buyer_name']}\n\n"
                     f"The buyer has cancelled their interest."
-                )
+                ),
             }
             result["farmer_notification"] = notification
 
@@ -1222,7 +1120,6 @@ class ToolRouter:
                 "message": "Only farmers can reject interests."
             }
 
-        # Extract interest_id from entities or text
         interest_id = entities.get("interest_id")
 
         if not interest_id:
@@ -1233,25 +1130,24 @@ class ToolRouter:
 
         result = reject_interest(interest_id, user_id)
 
-        # Send notification to buyer if available
         if result.get("buyer_notification") and result["buyer_notification"].get("buyer_chat_id"):
             buyer_notif = result["buyer_notification"]
             notification = {
                 "chat_id": buyer_notif["buyer_chat_id"],
                 "message": (
                     f"❌ Interest Declined\n\n"
-                    f"🌾 Product: {buyer_notif['crop_name'].capitalize()}\n"
+                    f"🌾 Product: {buyer_notif['product_name'].capitalize()}\n"
                     f"👤 Farmer: {buyer_notif['farmer_name']}\n\n"
                     f"The farmer has declined your interest. Try contacting other sellers."
-                )
+                ),
             }
             result["buyer_notification"] = notification
 
         return result
 
     def _get_crop_price(self, entities, user_id, image_url=None, text=""):
-        """Show crop price for specific region or all regions."""
-        from db.controller.cropPriceController import get_crop_price
+        """Show product price for specific region or all regions."""
+        from db.controller.productPriceController import get_product_price
         from utils.formatter import format_crop_price_table
 
         product = entities.get("product")
@@ -1260,13 +1156,16 @@ class ToolRouter:
         if not product:
             return {
                 "status": "error",
-                "message": "Which crop's price do you want to see?\n\nExample: 'What's the price of maize?'"
+                "message": "Which product's price do you want to see?\n\nExample: 'What's the price of maize?'"
             }
 
-        result = get_crop_price(product, region)
+        result = get_product_price(product, region)
 
         if result["status"] == "error":
             return result
+
+        if result["status"] == "service_not_supported":
+            return {"status": "ok", "message": result["message"]}
 
         if not result["prices"]:
             if region:
@@ -1289,61 +1188,47 @@ class ToolRouter:
                     )
                 }
 
-        # Format table
         table = format_crop_price_table(
-            result["crop_name"],
+            result["product_name"],
             result["prices"],
             result["overall_avg"],
-            region
+            region,
         )
 
-        # Add helpful tip
         if region:
             tip = f"\n\n💡 To see listings in {region}, send: 'Find {product} in {region}'"
         else:
             tip = f"\n\n💡 To see listings, send: 'Find {product}'"
 
-        return {
-            "status": "ok",
-            "message": table + tip
-        }
+        return {"status": "ok", "message": table + tip}
 
     def _get_all_crop_prices(self, entities, user_id, image_url=None, text=""):
-        """Show price overview for all crops."""
-        from db.controller.cropPriceController import get_all_crop_prices
-        from utils.formatter import format_all_crop_prices
+        """Show price overview for all products (excludes services)."""
+        from db.controller.productPriceController import get_all_product_prices
+        from utils.formatter import format_all_product_prices
 
-        result = get_all_crop_prices()
+        result = get_all_product_prices()
 
         if result["status"] == "error":
             return result
 
-        formatted = format_all_crop_prices(result["crops"])
+        formatted = format_all_product_prices(result["products"])
 
-        return {
-            "status": "ok",
-            "message": formatted
-        }
+        return {"status": "ok", "message": formatted}
 
     def _handle_location_input(self, text: str, user_id: str, context: dict) -> dict:
         """Handle location input for listing after creation."""
         from db.controller.listingController import update_listing
-        import re
 
         listing_id = context.get("listing_id")
-
-        # Clean up town name from potentially messy transcription
-        # Extract town names from common Cameroon cities
         town = text.strip()
 
-        # Check for common Cameroon cities in the text (case-insensitive)
         common_cities = [
             "Yaoundé", "Yaounde", "Douala", "Garoua", "Bafoussam", "Bamenda",
             "Maroua", "Ngaoundéré", "Ngaoundere", "Bertoua", "Buea", "Limbe",
-            "Edéa", "Edea", "Kribi", "Kumba", "Nkongsamba", "Ebolowa"
+            "Edéa", "Edea", "Kribi", "Kumba", "Nkongsamba", "Ebolowa",
         ]
 
-        # Try to find a city name in the text
         town_found = None
         text_lower = text.lower()
         for city in common_cities:
@@ -1351,21 +1236,16 @@ class ToolRouter:
                 town_found = city
                 break
 
-        # Use found city or clean up the input
         if town_found:
             town = town_found
         else:
-            # Remove common filler words and extract potential town name
-            # Remove phrases like "in ", "from ", etc.
+            import re
             town = re.sub(r'\b(in|from|at|the|and|it\'s?|come|selling|money)\b', '', text, flags=re.IGNORECASE)
             town = town.strip()
-
-            # Take first word/phrase if multiple words
             words = town.split()
             if words:
                 town = words[0].capitalize()
 
-        # Update listing with town
         result = update_listing(listing_id, user_id, {"town": town})
 
         if result["status"] == "error":
@@ -1380,4 +1260,3 @@ class ToolRouter:
 
     def _unknown(self, entities, user_id, image_url=None, text=""):
         return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}
-

@@ -2,7 +2,7 @@ from intents.classifier import IntentClassifier
 from entities.extractor import EntityExtractor
 from core.pipeline import AssistantPipeline
 
-from db.controller.cropController import get_crop_id
+from db.controller.productController import get_product_id
 
 clf = IntentClassifier()
 
@@ -45,6 +45,6 @@ tests = [
 
 
 
-print(get_crop_id("corn"))    # should return maize's id
-print(get_crop_id("manioc"))  # cassava
-print(get_crop_id("xyz"))     # None
+print(get_product_id("corn"))    # should return maize's id
+print(get_product_id("manioc"))  # cassava
+print(get_product_id("xyz"))     # None

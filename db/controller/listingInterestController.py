@@ -1,5 +1,5 @@
 from db.connect import conn
-from datetime import datetime, timedelta
+
 
 def save_interest(listing_id: int, user_id: str, quantity: int = None, message: str = None) -> dict:
     """
@@ -8,7 +8,7 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
     Args:
         listing_id: ID of the listing
         user_id: ID of the interested user
-        quantity: Optional quantity (kg) user is interested in
+        quantity: Optional quantity user is interested in
         message: Optional message to seller
 
     Returns:
@@ -16,13 +16,12 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
     """
     cur = conn.cursor()
 
-    # Get listing and seller information (both WhatsApp and Telegram)
     cur.execute("""
-        SELECT l.*, c.name as crop_name, u.name as seller_name,
+        SELECT l.*, p.name as product_name, u.name as seller_name,
                u.whatsapp_chat_id as seller_whatsapp_chat_id,
                u.telegram_id as seller_telegram_id
         FROM listings l
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         WHERE l.id = %s AND u.verified = 'true'
     """, (listing_id,))
@@ -33,12 +32,11 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
         cur.close()
         return {"status": "error", "message": "Listing not found or no longer available"}
 
-    # Check if user is trying to show interest in their own listing
-    if str(listing_data[1]) == str(user_id):  # user_id column
+    # user_id column is at index 1
+    if str(listing_data[1]) == str(user_id):
         cur.close()
         return {"status": "error", "message": "You cannot show interest in your own listing"}
 
-    # Get buyer information for notification
     cur.execute("""
         SELECT name, phone, whatsapp_chat_id
         FROM users
@@ -46,7 +44,6 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
     """, (user_id,))
     buyer_info = cur.fetchone()
 
-    # Check if active interest already exists
     cur.execute("""
         SELECT id FROM listing_interests
         WHERE listing_id = %s AND user_id = %s AND status = 'active'
@@ -56,7 +53,6 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
 
     try:
         if existing_interest:
-            # Update existing active interest
             cur.execute("""
                 UPDATE listing_interests
                 SET interested_quantity_kg = %s, message = %s, updated_at = NOW()
@@ -65,7 +61,6 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
             """, (quantity, message, existing_interest[0]))
             interest_id = cur.fetchone()[0]
         else:
-            # Insert new interest
             cur.execute("""
                 INSERT INTO listing_interests (listing_id, user_id, interested_quantity_kg, message, status)
                 VALUES (%s, %s, %s, %s, 'active')
@@ -76,28 +71,33 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
         conn.commit()
         cur.close()
 
+        # l.* indices (13 cols): id=0, user_id=1, product_id=2, quantity=3, measurement=4,
+        #                         price=5, town=6, region=7, origin=8, image_url=9,
+        #                         expires_at=10, created_at=11, updated_at=12
+        # then: product_name=13, seller_name=14, seller_whatsapp_chat_id=15, seller_telegram_id=16
         return {
             "status": "ok",
             "interest_id": interest_id,
             "listing": {
                 "id": listing_data[0],
-                "crop_name": listing_data[12],  # crop_name from join
-                "quantity_kg": listing_data[3],
-                "price": listing_data[4],
-                "seller_name": listing_data[13],  # seller_name from join
+                "product_name": listing_data[13],
+                "quantity": listing_data[3],
+                "measurement": listing_data[4],
+                "price": listing_data[5],
+                "seller_name": listing_data[14],
             },
             "buyer": {
                 "name": buyer_info[0],
                 "phone": buyer_info[1],
             },
             "seller_notification": {
-                "seller_whatsapp_chat_id": listing_data[14],  # seller_whatsapp_chat_id from join
-                "seller_telegram_id": listing_data[15],  # seller_telegram_id from join
+                "seller_whatsapp_chat_id": listing_data[15],
+                "seller_telegram_id": listing_data[16],
                 "buyer_name": buyer_info[0],
                 "buyer_phone": buyer_info[1],
-                "crop_name": listing_data[12],
+                "product_name": listing_data[13],
                 "quantity": quantity,
-            }
+            },
         }
     except Exception as e:
         conn.rollback()
@@ -105,13 +105,14 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
         print(f"SAVE INTEREST ERROR: {e}")
         return {"status": "error", "message": "Failed to save interest. Please try again."}
 
-def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
+
+def get_listing_interests(user_id: str, product_name: str = None) -> dict:
     """
     Get active interests shown on a farmer's listings (last 3 months).
 
     Args:
         user_id: Farmer's user ID
-        crop_name: Optional filter by crop name
+        product_name: Optional filter by product name
 
     Returns:
         dict with interests grouped by listing
@@ -121,12 +122,12 @@ def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
     filters = ["l.user_id = %s", "li.status = 'active'", "li.created_at >= NOW() - INTERVAL '3 months'"]
     values = [user_id]
 
-    if crop_name:
-        from db.controller.cropController import get_crop_id
-        crop_id = get_crop_id(crop_name)
-        if crop_id:
-            filters.append("l.crop_id = %s")
-            values.append(crop_id)
+    if product_name:
+        from db.controller.productController import get_product_id
+        product_id = get_product_id(product_name)
+        if product_id:
+            filters.append("l.product_id = %s")
+            values.append(product_id)
 
     where_clause = " AND ".join(filters)
 
@@ -134,8 +135,8 @@ def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
         SELECT
             li.id,
             l.id as listing_id,
-            c.name as crop_name,
-            l.quantity_kg,
+            p.name as product_name,
+            l.quantity,
             l.price,
             li.interested_quantity_kg,
             li.message,
@@ -145,7 +146,7 @@ def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
             li.status
         FROM listing_interests li
         JOIN listings l ON li.listing_id = l.id
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON li.user_id = u.id
         WHERE {where_clause}
         ORDER BY li.created_at DESC
@@ -158,19 +159,18 @@ def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
         return {
             "status": "ok",
             "total": 0,
-            "message": "No one has shown interest in your listings yet."
+            "message": "No one has shown interest in your listings yet.",
         }
 
-    # Group by listing
     grouped = {}
     for interest in interests:
         listing_id = interest[1]
         if listing_id not in grouped:
             grouped[listing_id] = {
-                "crop_name": interest[2],
-                "quantity_kg": interest[3],
+                "product_name": interest[2],
+                "quantity": interest[3],
                 "price": interest[4],
-                "interests": []
+                "interests": [],
             }
 
         grouped[listing_id]["interests"].append({
@@ -180,14 +180,15 @@ def get_listing_interests(user_id: str, crop_name: str = None) -> dict:
             "buyer_name": interest[7],
             "buyer_phone": interest[8],
             "created_at": interest[9],
-            "status": interest[10]
+            "status": interest[10],
         })
 
     return {
         "status": "ok",
         "total": len(interests),
-        "listings": grouped
+        "listings": grouped,
     }
+
 
 def get_user_interests(user_id: str) -> dict:
     """
@@ -205,8 +206,8 @@ def get_user_interests(user_id: str) -> dict:
         SELECT
             li.id,
             l.id as listing_id,
-            c.name as crop_name,
-            l.quantity_kg,
+            p.name as product_name,
+            l.quantity,
             l.price,
             li.interested_quantity_kg,
             li.message,
@@ -215,7 +216,7 @@ def get_user_interests(user_id: str) -> dict:
             li.status
         FROM listing_interests li
         JOIN listings l ON li.listing_id = l.id
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         WHERE li.user_id = %s
           AND li.status = 'active'
@@ -230,7 +231,7 @@ def get_user_interests(user_id: str) -> dict:
         return {
             "status": "ok",
             "total": 0,
-            "message": "You haven't shown interest in any listings yet."
+            "message": "You haven't shown interest in any listings yet.",
         }
 
     formatted_interests = []
@@ -238,21 +239,22 @@ def get_user_interests(user_id: str) -> dict:
         formatted_interests.append({
             "interest_id": interest[0],
             "listing_id": interest[1],
-            "crop_name": interest[2],
+            "product_name": interest[2],
             "listing_quantity": interest[3],
             "price": interest[4],
             "interested_quantity": interest[5],
             "message": interest[6],
             "seller_name": interest[7],
             "created_at": interest[8],
-            "status": interest[9]
+            "status": interest[9],
         })
 
     return {
         "status": "ok",
         "total": len(interests),
-        "interests": formatted_interests
+        "interests": formatted_interests,
     }
+
 
 def cancel_interest(interest_id: int, user_id: str) -> dict:
     """
@@ -267,15 +269,14 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
     """
     cur = conn.cursor()
 
-    # Get interest and verify ownership
     cur.execute("""
         SELECT li.id, li.listing_id, li.user_id, li.status,
-               l.user_id as farmer_id, c.name as crop_name,
+               l.user_id as farmer_id, p.name as product_name,
                u.whatsapp_chat_id as farmer_chat_id, u.name as farmer_name,
                buyer.name as buyer_name
         FROM listing_interests li
         JOIN listings l ON li.listing_id = l.id
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         JOIN users buyer ON li.user_id = buyer.id
         WHERE li.id = %s
@@ -295,7 +296,6 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
         cur.close()
         return {"status": "error", "message": "This interest is already cancelled or rejected"}
 
-    # Update status to cancelled_by_buyer
     try:
         cur.execute("""
             UPDATE listing_interests
@@ -311,14 +311,15 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
             "farmer_notification": {
                 "farmer_chat_id": interest_data[6],
                 "buyer_name": interest_data[8],
-                "crop_name": interest_data[5],
-            }
+                "product_name": interest_data[5],
+            },
         }
     except Exception as e:
         conn.rollback()
         cur.close()
         print(f"CANCEL INTEREST ERROR: {e}")
         return {"status": "error", "message": "Failed to cancel interest"}
+
 
 def reject_interest(interest_id: int, farmer_id: str) -> dict:
     """
@@ -333,15 +334,14 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
     """
     cur = conn.cursor()
 
-    # Get interest and verify farmer owns the listing
     cur.execute("""
         SELECT li.id, li.listing_id, li.user_id, li.status,
-               l.user_id as farmer_id, c.name as crop_name,
+               l.user_id as farmer_id, p.name as product_name,
                u.whatsapp_chat_id as buyer_chat_id, u.name as buyer_name,
                farmer.name as farmer_name
         FROM listing_interests li
         JOIN listings l ON li.listing_id = l.id
-        JOIN crops c ON l.crop_id = c.id
+        JOIN products p ON l.product_id = p.id
         JOIN users u ON li.user_id = u.id
         JOIN users farmer ON l.user_id = farmer.id
         WHERE li.id = %s
@@ -361,7 +361,6 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
         cur.close()
         return {"status": "error", "message": "This interest is already cancelled or rejected"}
 
-    # Update status to rejected_by_farmer
     try:
         cur.execute("""
             UPDATE listing_interests
@@ -377,8 +376,8 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
             "buyer_notification": {
                 "buyer_chat_id": interest_data[6],
                 "farmer_name": interest_data[8],
-                "crop_name": interest_data[5],
-            }
+                "product_name": interest_data[5],
+            },
         }
     except Exception as e:
         conn.rollback()
