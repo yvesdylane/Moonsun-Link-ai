@@ -43,6 +43,9 @@ class AssistantPipeline:
             "location_valid": groq_entities.get("location_valid", True),
             "location_rejection_reason": groq_entities.get("location_rejection_reason"),
             "location_auto_create": groq_entities.get("location_auto_create", False),
+            "report_type": groq_entities.get("report_type"),
+            "report_title": groq_entities.get("report_title"),
+            "report_description": groq_entities.get("report_description"),
         }
 
         intent = {

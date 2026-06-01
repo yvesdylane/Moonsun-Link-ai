@@ -153,7 +153,9 @@ Available intents:
 19. view_listing_image - User wants to see the photo of a specific listing number
 20. get_crop_price - User asks for market price of a product (optionally in a region)
 21. get_all_crop_prices - User wants price overview of all products
-22. unknown - None of the above match
+22. report_issue - User reports a plant/animal disease OR a product shortage/lack in an area
+23. view_alerts - User wants to see active alerts/warnings
+24. unknown - None of the above match
 
 PRODUCT WHITELIST — Only these products are accepted:
 {self.product_whitelist_str}
@@ -199,6 +201,9 @@ Extract entities:
 - location_valid: true/false — set to false ONLY for non-Cameroonian locations
 - location_rejection_reason: string — explain why location was rejected; only when location_valid is false
 - location_auto_create: true/false — set to true if real CM town not in whitelist
+- report_type: disease/shortage/other — when intent is report_issue, classify the issue type
+- report_title: short title summarizing the report (e.g. "Cassava disease in Yaoundé")
+- report_description: full user description of the issue — keep the user's original wording
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -221,7 +226,10 @@ Respond ONLY with valid JSON in this exact format:
         "default_measurement": null,
         "location_valid": true,
         "location_rejection_reason": null,
-        "location_auto_create": false
+        "location_auto_create": false,
+        "report_type": null,
+        "report_title": null,
+        "report_description": null
     }}
 }}
 
@@ -232,6 +240,11 @@ EXAMPLES:
 "I want to sell my tractor" → "tractor" is in whitelist under tools → product:"tractor", auto_create:false
 "I offer mechanic services" → "mechanic" is in whitelist under services → product:"mechanic", auto_create:false
 "I want to sell compost" → not in whitelist but clearly agriculture (fertilizer) → auto_create:true, product_type:"crop"
+"report cassava disease in yaounde" → intent:report_issue, report_type:"disease", report_title:"Cassava disease in Yaoundé", product:"cassava", location:"Yaoundé", region:"Centre"
+"there is no maize in bamenda" → intent:report_issue, report_type:"shortage", report_title:"Maize shortage in Bamenda", product:"maize", location:"Bamenda", region:"Nord-Ouest"
+"my goat is sick" → intent:report_issue, report_type:"disease", report_title:"Goat disease", product:"goat"
+"show me alerts in littoral" → intent:view_alerts, entities all null
+"are there any active alerts" → intent:view_alerts
 """
 
         try:
@@ -257,6 +270,9 @@ EXAMPLES:
             entities.setdefault("location_valid", True)
             entities.setdefault("location_rejection_reason", None)
             entities.setdefault("location_auto_create", False)
+            entities.setdefault("report_type", None)
+            entities.setdefault("report_title", None)
+            entities.setdefault("report_description", None)
 
             result["method"] = "groq"
 
@@ -274,6 +290,12 @@ EXAMPLES:
                     "rejection_reason": None,
                     "product_type": None,
                     "default_measurement": None,
+                    "location_valid": True,
+                    "location_rejection_reason": None,
+                    "location_auto_create": False,
+                    "report_type": None,
+                    "report_title": None,
+                    "report_description": None,
                 },
                 "error": str(e),
             }
@@ -302,6 +324,9 @@ EXAMPLES:
                     "location_valid": True,
                     "location_rejection_reason": None,
                     "location_auto_create": False,
+                    "report_type": None,
+                    "report_title": None,
+                    "report_description": None,
                 },
             }
 

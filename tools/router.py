@@ -162,6 +162,8 @@ class ToolRouter:
             "view_listing_image": self._view_listing_image,
             "get_crop_price": self._get_crop_price,
             "get_all_crop_prices": self._get_all_crop_prices,
+            "report_issue": self._report_issue,
+            "view_alerts": self._view_alerts,
         }
 
         handler = routes.get(intent, self._unknown)
@@ -1249,6 +1251,69 @@ class ToolRouter:
             "status": "ok",
             "message": f"✅ Location updated! Your listing is now in {town}, {context['region']}"
         }
+
+    def _report_issue(self, entities, user_id, image_url=None, text=""):
+        from db.controller.reportController import create_report
+
+        report_type = entities.get("report_type")
+        if not report_type:
+            return {"status": "error", "message": "What do you want to report? A plant/animal disease or a product shortage?"}
+
+        title = entities.get("report_title") or "Report"
+        description = entities.get("report_description") or text
+        product_name = entities.get("product")
+        location = entities.get("location")
+        region = entities.get("region")
+
+        result = create_report(
+            user_id=user_id,
+            report_type=report_type,
+            title=title,
+            description=description,
+            product_name=product_name,
+            location=location,
+            region=region,
+        )
+
+        if result["status"] == "error":
+            return result
+
+        msg = f"✅ Your report has been submitted (ID: #{result['report_id']}).\n\n"
+        msg += f"📋 *{title.capitalize()}*\n"
+        if product_name:
+            msg += f"🌾 Product: {product_name.capitalize()}\n"
+        if location:
+            msg += f"📍 Location: {location}"
+            if region:
+                msg += f", {region}"
+            msg += "\n"
+        msg += "\nOur team will review it. Thank you for helping the community!"
+
+        return {"status": "ok", "message": msg}
+
+    def _view_alerts(self, entities, user_id, image_url=None, text=""):
+        from db.controller.reportController import get_active_alerts
+
+        region = entities.get("region")
+        alerts = get_active_alerts(region)
+
+        if not alerts:
+            return {"status": "ok", "message": "✅ No active alerts at the moment. Stay informed!"}
+
+        lines = ["🚨 *Active Alerts*\n"]
+        for alert in alerts:
+            alert_id, title, desc, alert_type, alert_region, product, created_at, expires_at = alert
+            icon = "🦠" if alert_type == "disease_outbreak" else "📦" if alert_type == "product_shortage" else "⚠️"
+            lines.append(f"{icon} *{title}*")
+            if desc:
+                lines.append(f"   {desc}")
+            if alert_region:
+                lines.append(f"   📍 {alert_region}")
+            if product:
+                lines.append(f"   🌾 {product.capitalize()}")
+            lines.append("")
+
+        return {"status": "ok", "message": "\n".join(lines).strip()}
 
     def _unknown(self, entities, user_id, image_url=None, text=""):
         return {"status": "error", "message": "I didn't understand that. Try asking to sell, find, or delete a listing."}

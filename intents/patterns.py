@@ -361,4 +361,47 @@ INTENT_PATTERNS = {
             "show all market prices"
         ]
     },
+
+    "report_issue": {
+        "keywords": [
+            "report",
+            "disease",
+            "outbreak",
+            "sick",
+            "shortage",
+            "lack of",
+            "not available",
+            "problem",
+            "issue"
+        ],
+        "examples": [
+            "report cassava disease in Yaoundé",
+            "my chickens are sick",
+            "no maize available in Bamenda",
+            "there is a tomato disease in Littoral",
+            "report shortage of onions in Douala",
+            "I want to report a cassava disease",
+            "lack of corn in the market",
+            "there is no rice in Bafoussam"
+        ]
+    },
+
+    "view_alerts": {
+        "keywords": [
+            "alerts",
+            "warnings",
+            "notifications",
+            "what's happening",
+            "any alerts",
+            "active alerts"
+        ],
+        "examples": [
+            "show me active alerts",
+            "any alerts in my area",
+            "are there any disease alerts",
+            "what alerts are active",
+            "show alerts in Littoral",
+            "any warnings for farmers"
+        ]
+    },
 }
