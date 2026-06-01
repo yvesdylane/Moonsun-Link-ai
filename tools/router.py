@@ -323,6 +323,7 @@ class ToolRouter:
 
         if result["total"] > 0:
             from datetime import datetime
+            from decimal import Decimal
             listing_ids = [str(listing[0]) for listing in result["listings"]]
             listings_details = []
             for listing in result["listings"]:
@@ -332,6 +333,8 @@ class ToolRouter:
                         serializable_listing.append(str(x))
                     elif isinstance(x, datetime):
                         serializable_listing.append(x.isoformat())
+                    elif isinstance(x, Decimal):
+                        serializable_listing.append(float(x))
                     else:
                         serializable_listing.append(x)
                 listings_details.append(serializable_listing)
@@ -380,6 +383,7 @@ class ToolRouter:
 
     def _get_my_listings(self, entities, user_id, image_url=None, text=""):
         from datetime import datetime
+        from decimal import Decimal
         filters = {"product_name": entities.get("product"), "user_id": user_id, "include_unverified": True}
         result = get_listings(page=1, **filters)
         listing_ids = [str(listing[0]) for listing in result["listings"]] if result["total"] > 0 else []
@@ -392,6 +396,8 @@ class ToolRouter:
                         serializable_listing.append(str(x))
                     elif isinstance(x, datetime):
                         serializable_listing.append(x.isoformat())
+                    elif isinstance(x, Decimal):
+                        serializable_listing.append(float(x))
                     else:
                         serializable_listing.append(x)
                 listings_details.append(serializable_listing)
