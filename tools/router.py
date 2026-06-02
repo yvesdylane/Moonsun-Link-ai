@@ -1033,20 +1033,46 @@ class ToolRouter:
         )
 
         seller_notification = None
-        if seller_notif.get("seller_whatsapp_chat_id") or seller_notif.get("seller_telegram_id"):
-            quantity_text = f"📦 Quantity: {seller_notif['quantity']}{measurement_text}\n" if seller_notif.get('quantity') else ""
-            seller_notification = {
-                "whatsapp_chat_id": seller_notif.get("seller_whatsapp_chat_id"),
-                "telegram_id": seller_notif.get("seller_telegram_id"),
-                "message": (
-                    f"🔔 *New Interest in Your Listing!*\n\n"
-                    f"🌾 Product: {seller_notif['product_name'].capitalize()}\n"
-                    f"{quantity_text}"
-                    f"👤 Buyer: {seller_notif['buyer_name']}\n"
-                    f"📞 Contact: {seller_notif['buyer_phone']}\n\n"
-                    f"Contact them to complete the sale!"
-                ),
-            }
+        seller_whatsapp = seller_notif.get("seller_whatsapp_chat_id")
+        seller_telegram = seller_notif.get("seller_telegram_id")
+        if seller_whatsapp or seller_telegram:
+            qty_line = f"📦 Quantity: {seller_notif['quantity']}{measurement_text}\n" if seller_notif.get('quantity') else ""
+            notif_msg = (
+                f"🔔 *New Interest in Your Listing!*\n\n"
+                f"🌾 Product: {seller_notif['product_name'].capitalize()}\n"
+                f"{qty_line}"
+                f"👤 Buyer: {seller_notif['buyer_name']}\n"
+                f"📞 Contact: {seller_notif['buyer_phone']}\n\n"
+                f"Contact them to complete the sale!"
+            )
+
+            # Send WhatsApp notification (non-blocking)
+            if seller_whatsapp:
+                try:
+                    from utils.whatsapp import send_whatsapp_reply
+                    send_whatsapp_reply(seller_whatsapp, notif_msg)
+                    print(f"SELLER NOTIFIED (WhatsApp): {seller_whatsapp}")
+                except Exception as e:
+                    print(f"WHATSAPP SELLER NOTIFICATION ERROR: {e}")
+
+            # Send Telegram notification (non-blocking, direct HTTP)
+            if seller_telegram:
+                try:
+                    import os
+                    import requests
+                    tg_token = os.getenv("TELEGRAM_TOKEN")
+                    if tg_token:
+                        tg_url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+                        requests.post(tg_url, json={
+                            "chat_id": seller_telegram,
+                            "text": notif_msg,
+                            "parse_mode": "Markdown"
+                        }, timeout=10)
+                        print(f"SELLER NOTIFIED (Telegram): {seller_telegram}")
+                except Exception as e:
+                    print(f"TELEGRAM SELLER NOTIFICATION ERROR: {e}")
+
+            seller_notification = None
 
         return {
             "status": "ok",

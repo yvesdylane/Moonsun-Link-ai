@@ -60,14 +60,14 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
         if existing_interest:
             cur.execute("""
                 UPDATE listing_interests
-                SET interested_quantity_kg = %s, message = %s, updated_at = NOW()
+                SET interested_quantity = %s, message = %s, updated_at = NOW()
                 WHERE id = %s
                 RETURNING id
             """, (quantity, message, existing_interest['id']))
             interest_id = cur.fetchone()['id']
         else:
             cur.execute("""
-                INSERT INTO listing_interests (listing_id, user_id, interested_quantity_kg, message, status)
+                INSERT INTO listing_interests (listing_id, user_id, interested_quantity, message, status)
                 VALUES (%s, %s, %s, %s, 'active')
                 RETURNING id
             """, (listing_id, user_id, quantity, message))
@@ -139,7 +139,7 @@ def get_listing_interests(user_id: str, product_name: str = None) -> dict:
             p.name as product_name,
             l.quantity,
             l.price,
-            li.interested_quantity_kg,
+            li.interested_quantity,
             li.message,
             u.name as buyer_name,
             u.phone as buyer_phone,
@@ -176,7 +176,7 @@ def get_listing_interests(user_id: str, product_name: str = None) -> dict:
 
         grouped[listing_id]["interests"].append({
             "interest_id": interest['id'],
-            "quantity": interest['interested_quantity_kg'],
+            "quantity": interest['interested_quantity'],
             "message": interest['message'],
             "buyer_name": interest['buyer_name'],
             "buyer_phone": interest['buyer_phone'],
@@ -210,7 +210,7 @@ def get_user_interests(user_id: str) -> dict:
             p.name as product_name,
             l.quantity,
             l.price,
-            li.interested_quantity_kg,
+            li.interested_quantity,
             li.message,
             u.name as seller_name,
             li.created_at,
@@ -243,7 +243,7 @@ def get_user_interests(user_id: str) -> dict:
             "product_name": interest['product_name'],
             "listing_quantity": interest['quantity'],
             "price": interest['price'],
-            "interested_quantity": interest['interested_quantity_kg'],
+            "interested_quantity": interest['interested_quantity'],
             "message": interest['message'],
             "seller_name": interest['seller_name'],
             "created_at": interest['created_at'],
