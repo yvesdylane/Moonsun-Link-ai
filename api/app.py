@@ -12,6 +12,7 @@ from utils.audio_downloader import download_voice_note, download_attachment
 from utils.cloudinary_uploader import upload_image
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from api.admin import router as admin_router
 import asyncio
 import os
 import traceback
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(admin_router, prefix="/api/admin")
 router = ToolRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
