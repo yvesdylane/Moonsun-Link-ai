@@ -452,7 +452,7 @@ class ToolRouter:
         if result["total"] > 0:
             from datetime import datetime
             from decimal import Decimal
-            listing_ids = [str(listing[0]) for listing in result["listings"]]
+            listing_ids = [str(listing['id']) for listing in result["listings"]]
             listings_details = []
             for listing in result["listings"]:
                 serializable_listing = []
@@ -495,7 +495,7 @@ class ToolRouter:
         from decimal import Decimal
         filters = {"product_name": entities.get("product"), "user_id": user_id, "include_unverified": True}
         result = get_listings(page=1, **filters)
-        listing_ids = [str(listing[0]) for listing in result["listings"]] if result["total"] > 0 else []
+        listing_ids = [str(listing['id']) for listing in result["listings"]] if result["total"] > 0 else []
         listings_details = []
         if result["total"] > 0:
             for listing in result["listings"]:
@@ -547,15 +547,14 @@ class ToolRouter:
 
         if len(listings) == 1:
             clear_state(user_id)
-            return delete_listing(listing_id=listings[0][0], user_id=user_id)
+            return delete_listing(listing_id=listings[0]['id'], user_id=user_id)
 
-        # l[3]=quantity, l[4]=measurement, l[5]=price
         options = "\n".join([
-            f"{i+1}) {l[3]}{l[4] or 'kg'} at {l[5]} XAF"
+            f"{i+1}) {l['quantity']}{l['measurement'] or 'kg'} at {l['price']} XAF"
             for i, l in enumerate(listings)
         ])
         set_state(user_id, "awaiting_delete_choice", {
-            "listings": [[l[0], l[3], l[4], l[5]] for l in listings]
+            "listings": [[l['id'], l['quantity'], l['measurement'], l['price']] for l in listings]
         })
         return {"status": "ok", "message": f"Which listing do you want to delete?\n{options}"}
 
@@ -629,18 +628,17 @@ class ToolRouter:
 
         if len(listings) == 1:
             clear_state(user_id)
-            update_result = update_listing(listing_id=listings[0][0], user_id=user_id, updates=updates)
+            update_result = update_listing(listing_id=listings[0]['id'], user_id=user_id, updates=updates)
             if update_result["status"] == "error":
                 return update_result
-            return self._listing_preview(listings[0][0], user_id)
+            return self._listing_preview(listings[0]['id'], user_id)
 
-        # l[3]=quantity, l[4]=measurement, l[5]=price
         options = "\n".join([
-            f"{i+1}) {l[3]}{l[4] or 'kg'} at {l[5]} XAF"
+            f"{i+1}) {l['quantity']}{l['measurement'] or 'kg'} at {l['price']} XAF"
             for i, l in enumerate(listings)
         ])
         set_state(user_id, "awaiting_update_choice", {
-            "listings": [[l[0], l[3], l[4], l[5]] for l in listings],
+            "listings": [[l['id'], l['quantity'], l['measurement'], l['price']] for l in listings],
             "updates": updates,
         })
         return {"status": "ok", "message": f"Which listing do you want to update?\n{options}"}
@@ -738,12 +736,12 @@ class ToolRouter:
 
     def _listing_preview(self, listing_id: int, user_id: str) -> dict:
         result = get_listings(page=1, limit=1, user_id=user_id)
-        listing = next((l for l in result["listings"] if l[0] == listing_id), None)
+        listing = next((l for l in result["listings"] if l['id'] == listing_id), None)
         if listing:
             return {
                 "status": "ok",
                 "message": f"✅ Listing updated! Here is how it looks to buyers:\n\n{format_listing_item(listing, show_seller=False)}",
-                "preview_image": listing[9],
+                "preview_image": listing['image_url'],
             }
         return {"status": "ok", "message": "✅ Listing updated successfully"}
 
@@ -1078,7 +1076,7 @@ class ToolRouter:
                     "overall",
                 )
 
-            listing_ids = [listing[0] for listing in result["listings"]]
+            listing_ids = [listing['id'] for listing in result["listings"]]
             set_state(user_id, "viewing_listings", {
                 "listing_ids": listing_ids,
                 "page": 1,
@@ -1167,14 +1165,14 @@ class ToolRouter:
         if not row:
             return {"status": "error", "message": "Listing not found."}
 
-        image = row[0]
+        image = row['image_url']
         if not image:
             return {
                 "status": "ok",
                 "message": f"No photo available for listing #{listing_number}."
             }
 
-        product_name = row[1].capitalize()
+        product_name = row['name'].capitalize()
         return {
             "status": "ok",
             "message": f"📸 #{listing_number} {product_name}",
@@ -1453,7 +1451,14 @@ class ToolRouter:
 
         lines = ["🚨 *Active Alerts*\n"]
         for alert in alerts:
-            alert_id, title, desc, alert_type, alert_region, product, created_at, expires_at = alert
+            alert_id = alert['id']
+            title = alert['title']
+            desc = alert['description']
+            alert_type = alert['alert_type']
+            alert_region = alert['region']
+            product = alert['product_name']
+            created_at = alert['created_at']
+            expires_at = alert['expires_at']
             icon = "🦠" if alert_type == "disease_outbreak" else "📦" if alert_type == "product_shortage" else "⚠️"
             lines.append(f"{icon} *{title}*")
             if desc:
@@ -1510,7 +1515,14 @@ class ToolRouter:
         if matches:
             msg += "\n🎯 *We found advice that may help:*\n"
             for adv in matches:
-                adv_id, adv_title, adv_content, adv_product, adv_type, verified, upvotes, author = adv
+                adv_id = adv['id']
+                adv_title = adv['title']
+                adv_content = adv['content']
+                adv_product = adv['product_name']
+                adv_type = adv['issue_type']
+                verified = adv['is_verified']
+                upvotes = adv['upvotes']
+                author = adv['author_name']
                 check = "✅" if verified else "💡"
                 msg += f"\n{check} *{adv_title}* (by {author})\n"
                 msg += f"   {adv_content[:200]}"
@@ -1544,7 +1556,15 @@ class ToolRouter:
 
         lines = ["🌱 *Open Farming Issues*\n"]
         for issue in issues:
-            issue_id, title, desc, prod, itype, loc, reg, created, author = issue
+            issue_id = issue['id']
+            title = issue['title']
+            desc = issue['description']
+            prod = issue['product_name']
+            itype = issue['issue_type']
+            loc = issue['location']
+            reg = issue['region']
+            created = issue['created_at']
+            author = issue['author_name']
             icon = "🦠" if itype == "disease" else "🐛" if itype == "pest" else "🌍" if itype == "soil" else "🌤️" if itype == "weather" else "🔧" if itype == "technique" else "❓"
             lines.append(f"#{issue_id} {icon} *{title}*")
             if desc:
@@ -1586,8 +1606,8 @@ class ToolRouter:
             return {"status": "error", "message": f"Issue #{issue_number} not found."}
 
         title = f"Advice for issue #{issue_number}"
-        product_name = entities.get("product") or issue[4]
-        issue_type = entities.get("issue_type") or issue[5]
+        product_name = entities.get("product") or issue['product_name']
+        issue_type = entities.get("issue_type") or issue['issue_type']
 
         result = create_advice(
             issue_id=issue_number, author_id=user_id, title=title,

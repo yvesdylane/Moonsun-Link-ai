@@ -22,7 +22,7 @@ def _get_or_create_location_id(town: str, region: str = None) -> int | None:
         row = cur.fetchone()
         if row:
             cur.close()
-            return row[0]
+            return row['id']
 
     cur.execute(
         "SELECT id FROM locations WHERE LOWER(town) = LOWER(%s)",
@@ -31,7 +31,7 @@ def _get_or_create_location_id(town: str, region: str = None) -> int | None:
     row = cur.fetchone()
     if row:
         cur.close()
-        return row[0]
+        return row['id']
 
     insert_region = region if region else "General"
     try:
@@ -39,7 +39,7 @@ def _get_or_create_location_id(town: str, region: str = None) -> int | None:
             "INSERT INTO locations (town, region) VALUES (%s, %s) RETURNING id",
             (town, insert_region)
         )
-        new_id = cur.fetchone()[0]
+        new_id = cur.fetchone()['id']
         conn.commit()
         cur.close()
         return new_id
@@ -98,7 +98,7 @@ def create_listing(user_id, product_name, quantity, price, measurement=None,
         RETURNING id
     """
     cur.execute(query, (user_id, product_id, quantity, measurement, price, location_id, origin, image_url, description))
-    listing_id = cur.fetchone()[0]
+    listing_id = cur.fetchone()['id']
     conn.commit()
     cur.close()
 
@@ -213,14 +213,14 @@ def get_listings(page=1, limit=10, product_name=None, town=None, region=None,
     cur = conn.cursor()
 
     cur.execute(f"""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM listings l
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.user_id = u.id
         LEFT JOIN locations loc ON l.location_id = loc.id
         {where}
     """, values)
-    total = cur.fetchone()[0]
+    total = cur.fetchone()['total']
 
     cur.execute(f"""
         SELECT l.id, l.user_id, l.product_id, l.quantity, l.measurement, l.price,
@@ -267,7 +267,7 @@ def get_available_products() -> list:
           AND p.type != 'service'
         ORDER BY p.name
     """)
-    products = [row[0] for row in cur.fetchall()]
+    products = [row['name'] for row in cur.fetchall()]
     cur.close()
     return products
 
@@ -291,14 +291,14 @@ def get_product_locations(product_name: str) -> dict:
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM listings l
         JOIN users u ON l.user_id = u.id
         LEFT JOIN locations loc ON l.location_id = loc.id
         WHERE l.product_id = %s AND u.verified = 'true'
     """, (product_id,))
 
-    total_count = cur.fetchone()[0]
+    total_count = cur.fetchone()['total']
 
     if total_count == 0:
         cur.close()
@@ -318,14 +318,14 @@ def get_product_locations(product_name: str) -> dict:
     where = " AND ".join(filters)
 
     cur.execute(f"""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM listings l
         JOIN users u ON l.user_id = u.id
         LEFT JOIN locations loc ON l.location_id = loc.id
         WHERE {where}
     """, values)
 
-    filtered_count = cur.fetchone()[0]
+    filtered_count = cur.fetchone()['total']
 
     if filtered_count > 0:
         cur.close()
@@ -335,24 +335,24 @@ def get_product_locations(product_name: str) -> dict:
 
     if region:
         cur.execute("""
-            SELECT DISTINCT COALESCE(loc.region, l.origin)
+            SELECT DISTINCT COALESCE(loc.region, l.origin) AS region
             FROM listings l
             JOIN users u ON l.user_id = u.id
             LEFT JOIN locations loc ON l.location_id = loc.id
             WHERE l.product_id = %s AND u.verified = 'true'
         """, (product_id,))
-        available_regions = [row[0] for row in cur.fetchall()]
+        available_regions = [row['region'] for row in cur.fetchall()]
         feedback["available_regions"] = available_regions
         feedback["searched_region"] = region
 
     if max_price:
         cur.execute("""
-            SELECT MIN(l.price)
+            SELECT MIN(l.price) AS min_price
             FROM listings l
             JOIN users u ON l.user_id = u.id
             WHERE l.product_id = %s AND u.verified = 'true'
         """, (product_id,))
-        min_price = cur.fetchone()[0]
+        min_price = cur.fetchone()['min_price']
         feedback["min_price"] = min_price
         feedback["max_price_searched"] = max_price
 
@@ -386,14 +386,14 @@ def search_by_price(product_name: str, target_price: int, tolerance_percent: flo
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM listings l
         JOIN users u ON l.user_id = u.id
         LEFT JOIN locations loc ON l.location_id = loc.id
         WHERE l.product_id = %s AND u.verified = 'true'
     """, (product_id,))
 
-    total_count = cur.fetchone()[0]
+    total_count = cur.fetchone()['total']
 
     if total_count == 0:
         cur.close()
@@ -451,7 +451,7 @@ def search_by_price(product_name: str, target_price: int, tolerance_percent: flo
     return {
         "status": "alternatives",
         "target_price": target_price,
-        "nearest_prices": [{"price": row[0], "count": row[1]} for row in nearest_prices],
+        "nearest_prices": [{"price": row['price'], "count": row['count']} for row in nearest_prices],
         "message": f"No listings at {target_price} XAF, but here are the nearest prices",
     }
 
@@ -505,20 +505,20 @@ def get_listing_details(listing_id: int, user_id: str = None) -> dict:
     return {
         "status": "ok",
         "listing": {
-            "id": row[0],
-            "quantity": row[1],
-            "measurement": row[2] or "kg",
-            "price": row[3],
-            "town": row[4],
-            "region": row[5],
-            "origin": row[6],
-            "image_url": row[7],
-            "description": row[8],
-            "created_at": row[9],
-            "expires_at": row[10],
-            "product_name": row[11],
-            "seller_name": row[12],
-            "seller_phone": row[13],
-            "seller_id": row[14],
+            "id": row['id'],
+            "quantity": row['quantity'],
+            "measurement": row['measurement'] or "kg",
+            "price": row['price'],
+            "town": row['town'],
+            "region": row['region'],
+            "origin": row['origin'],
+            "image_url": row['image_url'],
+            "description": row['description'],
+            "created_at": row['created_at'],
+            "expires_at": row['expires_at'],
+            "product_name": row['product_name'],
+            "seller_name": row['seller_name'],
+            "seller_phone": row['seller_phone'],
+            "seller_id": row['user_id'],
         }
     }

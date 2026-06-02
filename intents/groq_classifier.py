@@ -89,7 +89,10 @@ class GroqIntentClassifier:
         cur.close()
 
         groups = {"crop": [], "animal": [], "tool": [], "service": []}
-        for name, ptype, meas in rows:
+        for row in rows:
+            name = row['name']
+            ptype = row['type']
+            meas = row['default_measurement']
             syns = PRODUCT_SYNONYMS.get(name)
             entry = name
             if syns:
@@ -111,7 +114,9 @@ class GroqIntentClassifier:
         cur.close()
 
         groups = {}
-        for town, region in rows:
+        for row in rows:
+            town = row['town']
+            region = row['region']
             groups.setdefault(region, []).append(town)
 
         lines = []
@@ -413,12 +418,12 @@ EXAMPLES:
         for idx, listing in enumerate(listings, 1):
             listings_context.append({
                 "number": idx,
-                "listing_id": listing[0],
-                "product": listing[13] if len(listing) > 13 else "Unknown",
-                "quantity": listing[3],
-                "measurement": listing[4],
-                "price": listing[5],
-                "location": f"{listing[6] or 'Not specified'}, {listing[7]}",
+                "listing_id": listing['id'],
+                "product": listing.get('product_name', "Unknown"),
+                "quantity": listing['quantity'],
+                "measurement": listing['measurement'],
+                "price": listing['price'],
+                "location": f"{listing['town'] or 'Not specified'}, {listing['region']}",
             })
 
         context_str = json.dumps(listings_context, indent=2)
@@ -468,7 +473,7 @@ Rules:
             if not listing_number or listing_number < 1 or listing_number > len(listings):
                 return {"status": "error", "message": f"Invalid listing number. Please choose between 1 and {len(listings)}."}
 
-            listing_id = listings[listing_number - 1][0]
+            listing_id = listings[listing_number - 1]['id']
 
             updates = result.get("updates", {})
             cleaned_updates = {}

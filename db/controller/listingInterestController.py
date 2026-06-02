@@ -1,3 +1,5 @@
+from psycopg.rows import dict_row
+
 from db.connect import conn
 
 
@@ -14,7 +16,7 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
     Returns:
         dict with status, buyer info (for farmer notification), and listing info
     """
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
 
     cur.execute("""
         SELECT l.id, l.user_id, l.product_id, l.quantity, l.measurement, l.price,
@@ -36,8 +38,7 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
         cur.close()
         return {"status": "error", "message": "Listing not found or no longer available"}
 
-    # user_id column is at index 1
-    if str(listing_data[1]) == str(user_id):
+    if str(listing_data['user_id']) == str(user_id):
         cur.close()
         return {"status": "error", "message": "You cannot show interest in your own listing"}
 
@@ -62,44 +63,40 @@ def save_interest(listing_id: int, user_id: str, quantity: int = None, message: 
                 SET interested_quantity_kg = %s, message = %s, updated_at = NOW()
                 WHERE id = %s
                 RETURNING id
-            """, (quantity, message, existing_interest[0]))
-            interest_id = cur.fetchone()[0]
+            """, (quantity, message, existing_interest['id']))
+            interest_id = cur.fetchone()['id']
         else:
             cur.execute("""
                 INSERT INTO listing_interests (listing_id, user_id, interested_quantity_kg, message, status)
                 VALUES (%s, %s, %s, %s, 'active')
                 RETURNING id
             """, (listing_id, user_id, quantity, message))
-            interest_id = cur.fetchone()[0]
+            interest_id = cur.fetchone()['id']
 
         conn.commit()
         cur.close()
 
-        # Column indices: id=0, user_id=1, product_id=2, quantity=3, measurement=4,
-        #                   price=5, town=6, region=7, origin=8, image_url=9,
-        #                   expires_at=10, created_at=11, updated_at=12
-        #                   product_name=13, seller_name=14, seller_whatsapp_chat_id=15, seller_telegram_id=16
         return {
             "status": "ok",
             "interest_id": interest_id,
             "listing": {
-                "id": listing_data[0],
-                "product_name": listing_data[13],
-                "quantity": listing_data[3],
-                "measurement": listing_data[4],
-                "price": listing_data[5],
-                "seller_name": listing_data[14],
+                "id": listing_data['id'],
+                "product_name": listing_data['product_name'],
+                "quantity": listing_data['quantity'],
+                "measurement": listing_data['measurement'],
+                "price": listing_data['price'],
+                "seller_name": listing_data['seller_name'],
             },
             "buyer": {
-                "name": buyer_info[0],
-                "phone": buyer_info[1],
+                "name": buyer_info['name'],
+                "phone": buyer_info['phone'],
             },
             "seller_notification": {
-                "seller_whatsapp_chat_id": listing_data[15],
-                "seller_telegram_id": listing_data[16],
-                "buyer_name": buyer_info[0],
-                "buyer_phone": buyer_info[1],
-                "product_name": listing_data[13],
+                "seller_whatsapp_chat_id": listing_data['seller_whatsapp_chat_id'],
+                "seller_telegram_id": listing_data['seller_telegram_id'],
+                "buyer_name": buyer_info['name'],
+                "buyer_phone": buyer_info['phone'],
+                "product_name": listing_data['product_name'],
                 "quantity": quantity,
             },
         }
@@ -121,7 +118,7 @@ def get_listing_interests(user_id: str, product_name: str = None) -> dict:
     Returns:
         dict with interests grouped by listing
     """
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
 
     filters = ["l.user_id = %s", "li.status = 'active'", "li.created_at >= NOW() - INTERVAL '3 months'"]
     values = [user_id]
@@ -168,23 +165,23 @@ def get_listing_interests(user_id: str, product_name: str = None) -> dict:
 
     grouped = {}
     for interest in interests:
-        listing_id = interest[1]
+        listing_id = interest['listing_id']
         if listing_id not in grouped:
             grouped[listing_id] = {
-                "product_name": interest[2],
-                "quantity": interest[3],
-                "price": interest[4],
+                "product_name": interest['product_name'],
+                "quantity": interest['quantity'],
+                "price": interest['price'],
                 "interests": [],
             }
 
         grouped[listing_id]["interests"].append({
-            "interest_id": interest[0],
-            "quantity": interest[5],
-            "message": interest[6],
-            "buyer_name": interest[7],
-            "buyer_phone": interest[8],
-            "created_at": interest[9],
-            "status": interest[10],
+            "interest_id": interest['id'],
+            "quantity": interest['interested_quantity_kg'],
+            "message": interest['message'],
+            "buyer_name": interest['buyer_name'],
+            "buyer_phone": interest['buyer_phone'],
+            "created_at": interest['created_at'],
+            "status": interest['status'],
         })
 
     return {
@@ -204,7 +201,7 @@ def get_user_interests(user_id: str) -> dict:
     Returns:
         dict with user's interests
     """
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
 
     cur.execute("""
         SELECT
@@ -241,16 +238,16 @@ def get_user_interests(user_id: str) -> dict:
     formatted_interests = []
     for interest in interests:
         formatted_interests.append({
-            "interest_id": interest[0],
-            "listing_id": interest[1],
-            "product_name": interest[2],
-            "listing_quantity": interest[3],
-            "price": interest[4],
-            "interested_quantity": interest[5],
-            "message": interest[6],
-            "seller_name": interest[7],
-            "created_at": interest[8],
-            "status": interest[9],
+            "interest_id": interest['id'],
+            "listing_id": interest['listing_id'],
+            "product_name": interest['product_name'],
+            "listing_quantity": interest['quantity'],
+            "price": interest['price'],
+            "interested_quantity": interest['interested_quantity_kg'],
+            "message": interest['message'],
+            "seller_name": interest['seller_name'],
+            "created_at": interest['created_at'],
+            "status": interest['status'],
         })
 
     return {
@@ -271,7 +268,7 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
     Returns:
         dict with status and farmer notification data
     """
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
 
     cur.execute("""
         SELECT li.id, li.listing_id, li.user_id, li.status,
@@ -292,11 +289,11 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
         cur.close()
         return {"status": "error", "message": "Interest not found"}
 
-    if str(interest_data[2]) != str(user_id):
+    if str(interest_data['user_id']) != str(user_id):
         cur.close()
         return {"status": "error", "message": "You can only cancel your own interests"}
 
-    if interest_data[3] != 'active':
+    if interest_data['status'] != 'active':
         cur.close()
         return {"status": "error", "message": "This interest is already cancelled or rejected"}
 
@@ -311,11 +308,11 @@ def cancel_interest(interest_id: int, user_id: str) -> dict:
 
         return {
             "status": "ok",
-            "message": f"Interest in {interest_data[5]} cancelled successfully",
+            "message": f"Interest in {interest_data['product_name']} cancelled successfully",
             "farmer_notification": {
-                "farmer_chat_id": interest_data[6],
-                "buyer_name": interest_data[8],
-                "product_name": interest_data[5],
+                "farmer_chat_id": interest_data['farmer_chat_id'],
+                "buyer_name": interest_data['buyer_name'],
+                "product_name": interest_data['product_name'],
             },
         }
     except Exception as e:
@@ -336,7 +333,7 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
     Returns:
         dict with status and buyer notification data
     """
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
 
     cur.execute("""
         SELECT li.id, li.listing_id, li.user_id, li.status,
@@ -357,11 +354,11 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
         cur.close()
         return {"status": "error", "message": "Interest not found"}
 
-    if str(interest_data[4]) != str(farmer_id):
+    if str(interest_data['farmer_id']) != str(farmer_id):
         cur.close()
         return {"status": "error", "message": "You can only reject interests on your own listings"}
 
-    if interest_data[3] != 'active':
+    if interest_data['status'] != 'active':
         cur.close()
         return {"status": "error", "message": "This interest is already cancelled or rejected"}
 
@@ -376,11 +373,11 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
 
         return {
             "status": "ok",
-            "message": f"Interest from {interest_data[7]} rejected",
+            "message": f"Interest from {interest_data['buyer_name']} rejected",
             "buyer_notification": {
-                "buyer_chat_id": interest_data[6],
-                "farmer_name": interest_data[8],
-                "product_name": interest_data[5],
+                "buyer_chat_id": interest_data['buyer_chat_id'],
+                "farmer_name": interest_data['farmer_name'],
+                "product_name": interest_data['product_name'],
             },
         }
     except Exception as e:

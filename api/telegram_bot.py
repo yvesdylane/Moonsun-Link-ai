@@ -41,7 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if exist:
             from db.controller.userController import get_user_by_telegram
             db_user = get_user_by_telegram(telegram_id)
-            name = db_user[2]  # name column
+            name = db_user['name']
             reply = translate_reply(
                 f"👋 Welcome back {name}! How can I help you today?\n\n"
                 "Just send me a message — I understand text and voice 🎙️",
@@ -197,14 +197,14 @@ async def _handle_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
         row = cur.fetchone()
         cur.close()
 
-        if not row or not row[0]:
+        if not row or not row['whatsapp_number']:
             await query.message.reply_text(translate_reply(
                 "❌ Could not find the WhatsApp account details. Please try again.",
                 user_lang
             ))
             return
 
-        whatsapp_number, whatsapp_chat_id = row
+        whatsapp_number = row['whatsapp_number']; whatsapp_chat_id = row['whatsapp_chat_id']
 
         if not whatsapp_chat_id:
             await query.message.reply_text(translate_reply(
@@ -503,7 +503,7 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
         # Check if Telegram user already has a separate DB account (merge needed)
         from db.controller.userController import get_user_by_telegram
         telegram_user = get_user_by_telegram(telegram_id)
-        telegram_user_id_to_merge = str(telegram_user[0]) if telegram_user else None
+        telegram_user_id_to_merge = str(telegram_user['id']) if telegram_user else None
 
         # Get the Telegram number if available
         telegram_number = context.user_data.get("reg_telegram_number")
@@ -698,7 +698,11 @@ async def _handle_contact_inner(update: Update, context: ContextTypes.DEFAULT_TY
     cur.close()
 
     if existing:
-        telegram_num, whatsapp_num, sms_phone, existing_name, existing_id = existing
+        telegram_num = existing['telegram_number']
+        whatsapp_num = existing['whatsapp_number']
+        sms_phone = existing['phone']
+        existing_name = existing['name']
+        existing_id = existing['id']
 
         # Check which platform
         if telegram_num == phone:
@@ -862,7 +866,7 @@ async def send_telegram_notification(context: ContextTypes.DEFAULT_TYPE, notific
     result = cur.fetchone()
     cur.close()
 
-    lang = result[0] if result else "en"
+    lang = result['lang'] if result else "en"
 
     # Translate notification message
     message = translate_reply(message, lang)

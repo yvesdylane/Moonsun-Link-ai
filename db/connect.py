@@ -84,10 +84,12 @@ class LegacyConnectionWrapper:
     def __init__(self):
         self._current_conn = None
 
-    def cursor(self, *args, **kwargs):
+    def cursor(self, **kwargs):
+        from psycopg.rows import dict_row
         if self._current_conn is None:
             self._current_conn = sync_pool.getconn()
-        return self._current_conn.cursor(*args, **kwargs)
+        kwargs.setdefault('row_factory', dict_row)
+        return self._current_conn.cursor(**kwargs)
 
     def commit(self):
         if self._current_conn:

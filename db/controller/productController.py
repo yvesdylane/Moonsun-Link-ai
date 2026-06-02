@@ -8,7 +8,7 @@ def get_product_id(product_name: str) -> int | None:
     cur.execute("SELECT id FROM products WHERE name = %s", (product_name,))
     row = cur.fetchone()
     cur.close()
-    return row[0] if row else None
+    return row['id'] if row else None
 
 
 def get_product_info(product_name: str) -> dict | None:
@@ -19,10 +19,10 @@ def get_product_info(product_name: str) -> dict | None:
     cur.close()
     if row:
         return {
-            "id": row[0],
-            "name": row[1],
-            "type": row[2],
-            "default_measurement": row[3],
+            "id": row['id'],
+            "name": row['name'],
+            "type": row['type'],
+            "default_measurement": row['default_measurement'],
         }
     return None
 
@@ -49,7 +49,7 @@ def create_product(name: str, product_type: str, default_measurement: str = None
             "INSERT INTO products (name, type, default_measurement) VALUES (%s, %s, %s) RETURNING id",
             (name, product_type, default_measurement),
         )
-        product_id = cur.fetchone()[0]
+        product_id = cur.fetchone()['id']
         conn.commit()
         cur.close()
         print(f"PRODUCT AUTO-CREATED: {name} (type={product_type}, measurement={default_measurement}, id={product_id})")

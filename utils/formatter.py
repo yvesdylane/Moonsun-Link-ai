@@ -3,15 +3,15 @@ def format_listing_item(listing: tuple, show_seller: bool = False, listing_numbe
     #                   price=5, town=6, region=7, origin=8, image_url=9,
     #                   expires_at=10, created_at=11, updated_at=12
     #                   product_name=13, seller_name=14 (if joined)
-    product_name = listing[13].capitalize()
-    quantity = listing[3]
-    measurement = listing[4] or "kg"
-    price = listing[5]
-    town = listing[6]
-    region = listing[7]
-    origin = listing[8]
-    image_url = listing[9]
-    expires_at = listing[10].strftime("%d %b %Y")
+    product_name = listing['product_name'].capitalize()
+    quantity = listing['quantity']
+    measurement = listing['measurement'] or "kg"
+    price = listing['price']
+    town = listing['town']
+    region = listing['region']
+    origin = listing['origin']
+    image_url = listing['image_url']
+    expires_at = listing['expires_at'].strftime("%d %b %Y")
 
     if listing_number:
         lines = [f"#{listing_number} 🌾 {product_name} from {origin}"]
@@ -19,7 +19,7 @@ def format_listing_item(listing: tuple, show_seller: bool = False, listing_numbe
         lines = [f"🌾 {product_name} from {origin}"]
 
     if show_seller and len(listing) > 13:
-        seller = listing[14]
+        seller = listing['seller_name']
         lines.append(f"👤 Sold by {seller}")
 
     price_line = f"📦 {quantity}{measurement} available at {price} XAF/{measurement}"
@@ -75,7 +75,7 @@ def format_listings(result: dict, show_seller: bool = False, market_avg: float =
     if show_seller and listings:
         lines.append(f"\n💡 To show interest, send: 'I'm interested in [quantity] of listing #[number]'")
 
-    has_images = any(l[9] for l in listings)
+    has_images = any(    l['image_url'] for l in listings)
     if has_images:
         lines.append(f"\n📸 To see photos, send: 'show image of listing #[number]'")
 
@@ -86,8 +86,8 @@ def format_listings(result: dict, show_seller: bool = False, market_avg: float =
 
 def get_listing_images(result: dict, show_seller: bool = False) -> list:
     return [
-        (l[9], format_listing_item(l, show_seller=show_seller, listing_number=i+1))
-        for i, l in enumerate(result["listings"]) if l[9]
+        (    l['image_url'], format_listing_item(l, show_seller=show_seller, listing_number=i+1))
+        for i, l in enumerate(result["listings"]) if     l['image_url']
     ]
 
 

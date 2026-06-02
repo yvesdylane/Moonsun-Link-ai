@@ -1,19 +1,19 @@
 from db.connect import conn
 import json
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 def get_state(user_id: str) -> dict | None:
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
     cur.execute("SELECT state, context FROM conversation_state WHERE user_id = %s", (user_id,))
     result = cur.fetchone()
     cur.close()
     if result:
-        # PostgreSQL jsonb type is already parsed by psycopg
-        return {"state": result[0], "context": result[1] if result[1] else {}}
+        return {"state": result['state'], "context": result['context'] if result['context'] else {}}
     return None
 
 def set_state(user_id: str, state: str, context: dict = {}):
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
     cur.execute("SELECT id FROM conversation_state WHERE user_id = %s", (user_id,))
     exists = cur.fetchone()
     if exists:

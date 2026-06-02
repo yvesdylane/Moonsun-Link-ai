@@ -1,24 +1,25 @@
 from db.connect import conn
+from psycopg.rows import dict_row
 
 
 def create_report(user_id: str, report_type: str, title: str,
                   description: str = None, product_name: str = None,
                   location: str = None, region: str = None) -> dict:
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
     try:
         cur.execute("""
             INSERT INTO reports (user_id, report_type, title, description, product_name, location, region)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id, created_at
         """, (user_id, report_type, title, description, product_name, location, region))
-        report_id, created_at = cur.fetchone()
+        report_data = cur.fetchone()
         conn.commit()
         return {
             "status": "ok",
-            "report_id": report_id,
+            "report_id": report_data['id'],
             "report_type": report_type,
             "title": title,
-            "created_at": created_at,
+            "created_at": report_data['created_at'],
         }
     except Exception as e:
         conn.rollback()
@@ -39,7 +40,7 @@ def get_reports(status: str = None, user_id: str = None) -> list:
 
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
 
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
     cur.execute(f"""
         SELECT r.*, u.name as user_name
         FROM reports r
@@ -53,7 +54,7 @@ def get_reports(status: str = None, user_id: str = None) -> list:
 
 
 def get_active_alerts(region: str = None) -> list:
-    cur = conn.cursor()
+    cur = conn.cursor(row_factory=dict_row)
     if region:
         cur.execute("""
             SELECT id, title, description, alert_type, region, product_name, created_at, expires_at

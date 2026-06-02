@@ -27,34 +27,26 @@ class User:
     code_expire_at: Optional[datetime]
 
     @classmethod
-    def from_db_row(cls, row: tuple) -> 'User':
-        """
-        Create User from database row tuple.
-        Expected order from SELECT * FROM users:
-        (id, user_id, name, phone, email, role, region, telegram_id,
-         telegram_number, whatsapp_number, whatsapp_chat_id, lang,
-         pic_folder, verified, linking_code, code_expire_at,
-         created_at, updated_at)
-        """
+    def from_db_row(cls, row: dict) -> 'User':
         return cls(
-            id=row[0],
-            user_id=row[1],
-            name=row[2],
-            phone=row[3],
-            email=row[4],
-            role=row[5],
-            region=row[6],
-            telegram_id=row[7],
-            telegram_number=row[8],
-            whatsapp_number=row[9],
-            whatsapp_chat_id=row[10],
-            lang=row[11],
-            pic_folder=row[12],
-            verified=row[13],
-            linking_code=row[14],
-            code_expire_at=row[15],
-            created_at=row[16],
-            updated_at=row[17]
+            id=row['id'],
+            user_id=row['user_id'],
+            name=row['name'],
+            phone=row['phone'],
+            email=row['email'],
+            role=row['role'],
+            region=row['region'],
+            telegram_id=row['telegram_id'],
+            telegram_number=row['telegram_number'],
+            whatsapp_number=row['whatsapp_number'],
+            whatsapp_chat_id=row['whatsapp_chat_id'],
+            lang=row['lang'],
+            pic_folder=row['pic_folder'],
+            verified=row['verified'],
+            linking_code=row['linking_code'],
+            code_expire_at=row['code_expire_at'],
+            created_at=row['created_at'],
+            updated_at=row['updated_at']
         )
 
     def is_farmer(self) -> bool:

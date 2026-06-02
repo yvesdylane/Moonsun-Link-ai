@@ -60,12 +60,12 @@ def get_product_price(product_name: str, region: str = None) -> dict:
             "status": "ok",
             "product_name": product_name,
             "region": region,
-            "overall_avg": result[3],
+            "overall_avg": result['avg_price'],
             "prices": [{
-                "region": result[0],
-                "min": result[1],
-                "max": result[2],
-                "avg": result[3]
+                "region": result['region'],
+                "min": result['min_price'],
+                "max": result['max_price'],
+                "avg": result['avg_price']
             }]
         }
 
@@ -90,7 +90,7 @@ def get_product_price(product_name: str, region: str = None) -> dict:
         }
 
     # Calculate overall average
-    total_avg = sum(row[3] for row in prices)
+    total_avg = sum(row['avg_price'] for row in prices)
     overall_avg = total_avg // len(prices)
 
     return {
@@ -99,10 +99,10 @@ def get_product_price(product_name: str, region: str = None) -> dict:
         "overall_avg": overall_avg,
         "prices": [
             {
-                "region": row[0],
-                "min": row[1],
-                "max": row[2],
-                "avg": row[3]
+                "region": row['region'],
+                "min": row['min_price'],
+                "max": row['max_price'],
+                "avg": row['avg_price']
             }
             for row in prices
         ]
@@ -130,13 +130,13 @@ def get_all_product_prices() -> dict:
     cur.close()
 
     result_products = []
-    for product_id, product_name in products:
-        price_data = get_product_price(product_name)
+    for product in products:
+        price_data = get_product_price(product['name'])
         if price_data["status"] == "ok" and price_data.get("prices"):
             min_price = min(p["min"] for p in price_data["prices"])
             max_price = max(p["max"] for p in price_data["prices"])
             result_products.append({
-                "product_name": product_name,
+                "product_name": product['name'],
                 "overall_avg": price_data["overall_avg"],
                 "min_price": min_price,
                 "max_price": max_price,
@@ -187,25 +187,25 @@ def get_market_price_for_listing_search(product_name: str = None, region: str = 
             return {
                 "product_name": product_name,
                 "region": region,
-                "min_price": result[0],
-                "max_price": result[1],
-                "avg_price": result[2],
+                "min_price": result['min_price'],
+                "max_price": result['max_price'],
+                "avg_price": result['avg_price'],
             }
         return None
 
     # Overall average across all regions
     cur.execute("""
-        SELECT AVG(avg_price)::INTEGER
+        SELECT AVG(avg_price)::INTEGER AS avg_price
         FROM product_prices
         WHERE product_id = %s
     """, (product_id,))
     result = cur.fetchone()
     cur.close()
 
-    if result and result[0]:
+    if result and result['avg_price']:
         return {
             "product_name": product_name,
-            "avg_price": result[0],
+            "avg_price": result['avg_price'],
         }
 
     return None
@@ -215,10 +215,10 @@ def calculate_overall_avg(product_id: int) -> float:
     """Calculate overall average price for a product across all regions."""
     cur = conn.cursor()
     cur.execute("""
-        SELECT AVG(avg_price)
+        SELECT AVG(avg_price) AS avg_price
         FROM product_prices
         WHERE product_id = %s
     """, (product_id,))
     result = cur.fetchone()
     cur.close()
-    return result[0] if result and result[0] else None
+    return result['avg_price'] if result and result['avg_price'] else None

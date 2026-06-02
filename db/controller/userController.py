@@ -13,8 +13,9 @@ def get_user_by_phone(phone):
 def check_if_user_exist(phone):
     user = get_user_by_phone(phone)
     if user:
-        return True, user[0]
+        return True, user['id']
     return False, None
+
 
 def create_user_from_whatsapp(phone: str, name: str, chat_id: str = None) -> str:
     cur = conn.cursor()
@@ -24,7 +25,7 @@ def create_user_from_whatsapp(phone: str, name: str, chat_id: str = None) -> str
         RETURNING id
     """
     cur.execute(query, (name, phone, phone, chat_id))
-    user_id = cur.fetchone()[0]
+    user_id = cur.fetchone()['id']
     conn.commit()
     cur.close()
     return user_id
@@ -45,7 +46,7 @@ def get_user_role(user_id: str) -> str | None:
     cur.execute("SELECT role FROM users WHERE id = %s", (user_id,))
     result = cur.fetchone()
     cur.close()
-    return result[0] if result else None
+    return result['role'] if result else None
 
 def get_user_by_telegram(telegram_id: str):
     cur = conn.cursor()
@@ -57,7 +58,7 @@ def get_user_by_telegram(telegram_id: str):
 def check_if_user_exist_by_telegram(telegram_id: str):
     user = get_user_by_telegram(telegram_id)
     if user:
-        return True, user[0]
+        return True, user['id']
     return False, None
 
 def create_user_from_telegram(telegram_id: str, name: str, telegram_number: str = None, region: str = "General") -> str:
@@ -71,7 +72,7 @@ def create_user_from_telegram(telegram_id: str, name: str, telegram_number: str 
         VALUES (%s, %s, %s, 'buyer', %s, 'en')
         RETURNING id
     """, (name, telegram_id, telegram_number, region))
-    user_id = cur.fetchone()[0]
+    user_id = cur.fetchone()['id']
     conn.commit()
     cur.close()
     return user_id
@@ -95,7 +96,10 @@ def check_cross_platform_account(phone_number: str) -> dict:
     if not result:
         return None
 
-    user_id, telegram_num, whatsapp_num, sms_phone = result
+    user_id = result['id']
+    telegram_num = result['telegram_number']
+    whatsapp_num = result['whatsapp_number']
+    sms_phone = result['phone']
 
     # Determine which platform
     if telegram_num == phone_number:
@@ -130,10 +134,10 @@ def link_telegram_to_account(phone: str, telegram_id: str) -> dict:
     if not user:
         return {"status": "error", "message": "No account found"}
     cur = conn.cursor()
-    cur.execute("UPDATE users SET telegram_id = %s WHERE id = %s", (telegram_id, user[0]))
+    cur.execute("UPDATE users SET telegram_id = %s WHERE id = %s", (telegram_id, user['id']))
     conn.commit()
     cur.close()
-    return {"status": "ok", "name": user[2]}
+    return {"status": "ok", "name": user['name']}
 
 
 import random
@@ -157,7 +161,10 @@ def find_whatsapp_user_by_number(phone: str) -> dict:
     if not row:
         return None  # No account with this WhatsApp number
 
-    user_id, name, chat_id, created_at, user_id_str = row
+    user_id = row['id']
+    name = row['name']
+    chat_id = row['whatsapp_chat_id']
+    created_at = row['created_at']
     if not chat_id:
         return {"status": "no_chat_id", "id": str(user_id), "name": name}
 
@@ -207,7 +214,11 @@ def verify_linking_code(phone: str, entered_code: str) -> dict:
     if not row:
         return {"status": "error", "message": "No account found with that number"}
 
-    user_id, name, stored_code, expires_at, created_at, user_id_str = row
+    user_id = row['id']
+    name = row['name']
+    stored_code = row['linking_code']
+    expires_at = row['code_expire_at']
+    created_at = row['created_at']
 
     if not stored_code:
         return {"status": "error", "message": "No verification code was sent. Please start the linking process again."}
@@ -278,8 +289,8 @@ def link_and_merge_accounts(whatsapp_user_id: str, telegram_id: str, telegram_nu
         rows = cur.fetchall()
 
         if len(rows) == 2:
-            id_a, created_a = rows[0]
-            id_b, created_b = rows[1]
+            id_a, created_a = rows[0]['id'], rows[0]['created_at']
+            id_b, created_b = rows[1]['id'], rows[1]['created_at']
             id_a, id_b = str(id_a), str(id_b)
 
             keep_id = id_a if created_a <= created_b else id_b
@@ -312,10 +323,6 @@ def get_user_info(user_id: str) -> Optional[User]:
     cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     row = cur.fetchone()
     cur.close()
-    if row:
-        print(f"[DB] get_user_info({user_id}) -> verified='{row[14]}', role='{row[5]}', name='{row[2]}', region='{row[6]}'")
-    else:
-        print(f"[DB] get_user_info({user_id}) -> NOT FOUND")
     return User.from_db_row(row) if row else None
 
 def update_user_info(user_id: str, updates: dict) -> dict:
@@ -356,7 +363,7 @@ def change_role_to_farmer(user_id: str, region: str) -> dict:
     if not result:
         return {"status": "error", "message": "User not found"}
 
-    verified = result[0]
+    verified = result['verified']
     if verified != 'true':
         return {
             "status": "ok",
@@ -399,7 +406,9 @@ def check_verification_status(user_id: str) -> dict:
     if not result:
         return {"status": "error", "message": "User not found"}
 
-    verified, role, pic_folder = result
+    verified = result['verified']
+    role = result['role']
+    pic_folder = result['pic_folder']
 
     if role != "farmer":
         return {"status": "ok", "message": "Verification is only required for farmers. Switch to farmer role to create listings."}
