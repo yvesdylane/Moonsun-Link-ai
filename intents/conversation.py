@@ -1,9 +1,12 @@
 import json
 import os
+import time
 from groq import Groq, RateLimitError
 from dotenv import load_dotenv
 
 load_dotenv()
+
+COOLDOWN_DURATION = 300
 
 
 class ConversationEngine:
@@ -12,7 +15,16 @@ class ConversationEngine:
         self.clients = self._load_clients()
         self.current_key = 0
         self.last_429 = {}
+        self._all_exhausted_since = 0.0
         self.bot_persona = self._load_bot_persona()
+
+    def _is_exhausted(self) -> bool:
+        if not self._all_exhausted_since:
+            return False
+        if time.time() - self._all_exhausted_since > COOLDOWN_DURATION:
+            self._all_exhausted_since = 0.0
+            return False
+        return True
 
     def _load_bot_persona(self) -> str:
         try:
@@ -37,7 +49,11 @@ class ConversationEngine:
         return [Groq(api_key=k) for k in keys] if keys else [Groq(api_key="")]
 
     def _call_groq(self, system_prompt, user_content, max_tokens=500):
-        import time
+        if self._is_exhausted():
+            remaining = int(COOLDOWN_DURATION - (time.time() - self._all_exhausted_since))
+            print(f"GROQ EXHAUSTED: skipping ConversationEngine call for {remaining}s")
+            return None
+
         for attempt in range(len(self.clients) * 2):
             now = time.time()
             available = [
@@ -45,8 +61,8 @@ class ConversationEngine:
                 if now - self.last_429.get(i, 0) > 60
             ]
             if not available:
-                min_wait = min(60 - (now - t) for t in self.last_429.values())
-                time.sleep(min_wait + 1)
+                remaining = min(60 - (now - t) for t in self.last_429.values())
+                time.sleep(remaining + 1)
                 continue
 
             idx = None
@@ -76,6 +92,8 @@ class ConversationEngine:
                 print(f"CONV GROQ ERROR key #{idx}: {e}")
                 self.last_429[idx] = time.time()
                 continue
+        self._all_exhausted_since = time.time()
+        print(f"GROQ EXHAUSTED: all keys rate-limited, cooling down for {COOLDOWN_DURATION}s")
         return None
 
     def respond(self, conversation: list, active_flow: dict | None, user_message: str) -> dict:
@@ -135,6 +153,12 @@ Do NOT ask for fields that were already collected.
 
         response = self._call_groq(system_prompt, user_message)
         if not response:
+            if self._is_exhausted():
+                return {
+                    "message": "Sorry, Moonso Link is experiencing high demand right now. Please try again in a few minutes.",
+                    "completed": False,
+                    "extracted": {},
+                }
             return {
                 "message": "I'm having trouble connecting. Please try again in a moment.",
                 "completed": False,

@@ -298,6 +298,7 @@ class ToolRouter:
             "browse_issues": self._browse_issues,
             "give_advice": self._give_advice,
             "view_listing_details": self._view_listing_details,
+            "service_unavailable": self._service_unavailable,
         }
 
         handler = routes.get(intent, self._unknown)
@@ -1699,6 +1700,12 @@ class ToolRouter:
         msg += "Other farmers can now see and upvote it. Thank you for helping the community!"
 
         return {"status": "ok", "message": msg}
+
+    def _service_unavailable(self, entities, user_id, image_url=None, text=""):
+        return {
+            "status": "ok",
+            "message": "Sorry, Moonso Link is experiencing high demand right now. Our AI service is temporarily unavailable. Please try again in a few minutes. Basic features like browsing your profile are still available."
+        }
 
     def _unknown(self, entities, user_id, image_url=None, text=""):
         state = get_state(user_id)

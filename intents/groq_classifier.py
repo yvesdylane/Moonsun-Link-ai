@@ -8,15 +8,27 @@ from db.connect import conn
 load_dotenv()
 
 
+COOLDOWN_DURATION = 300  # 5 minutes before retrying after all keys exhausted
+
+
 class GroqIntentClassifier:
     def __init__(self):
         self.model = "llama-3.3-70b-versatile"
         self.clients = self._load_all_clients()
         self.current_key = 0
         self.last_429 = {}
+        self._all_exhausted_since = 0.0
         self.product_whitelist_str = self._load_product_whitelist()
         self.location_whitelist_str = self._load_location_whitelist()
         self.bot_persona = self._load_bot_persona()
+
+    def _is_exhausted(self) -> bool:
+        if not self._all_exhausted_since:
+            return False
+        if time.time() - self._all_exhausted_since > COOLDOWN_DURATION:
+            self._all_exhausted_since = 0.0
+            return False
+        return True
 
     def _load_all_clients(self) -> list:
         keys = []
@@ -36,6 +48,11 @@ class GroqIntentClassifier:
         return [Groq(api_key=k) for k in keys]
 
     def _call_groq(self, system_prompt, user_content, max_tokens=400):
+        if self._is_exhausted():
+            remaining = int(COOLDOWN_DURATION - (time.time() - self._all_exhausted_since))
+            print(f"GROQ EXHAUSTED: skipping {self.__class__.__name__} call for {remaining}s")
+            return None
+
         for attempt in range(len(self.clients) * 2):
             now = time.time()
             available = [
@@ -43,9 +60,9 @@ class GroqIntentClassifier:
                 if now - self.last_429.get(i, 0) > 60
             ]
             if not available:
-                min_wait = min(60 - (now - t) for t in self.last_429.values())
-                print(f"All Groq keys rate-limited, waiting {min_wait:.0f}s...")
-                time.sleep(min_wait + 1)
+                remaining = min(60 - (now - t) for t in self.last_429.values())
+                print(f"All Groq keys rate-limited, waiting {remaining:.0f}s...")
+                time.sleep(remaining + 1)
                 continue
 
             idx = None
@@ -78,7 +95,9 @@ class GroqIntentClassifier:
                 self.last_429[idx] = time.time()
                 continue
 
-        raise Exception("All Groq API keys are rate-limited. Service unavailable for now.")
+        self._all_exhausted_since = time.time()
+        print(f"GROQ EXHAUSTED: all keys rate-limited, cooling down for {COOLDOWN_DURATION}s")
+        return None
 
     def _load_product_whitelist(self) -> str:
         """Build a formatted string of all approved products from the DB."""
@@ -322,6 +341,32 @@ EXAMPLES:
         try:
             response = self._call_groq(system_prompt, f"Classify this message: {text}", max_tokens=400)
 
+            if response is None:
+                print(f"GROQ CLASSIFY UNAVAILABLE: service exhausted")
+                return {
+                    "intent": "service_unavailable",
+                    "confidence": 1.0,
+                    "method": "exhausted",
+                    "entities": {
+                        "auto_create": False,
+                        "valid": True,
+                        "rejection_reason": None,
+                        "product_type": None,
+                        "default_measurement": None,
+                        "location_valid": True,
+                        "location_rejection_reason": None,
+                        "location_auto_create": False,
+                        "report_type": None,
+                        "report_title": None,
+                        "report_description": None,
+                        "issue_title": None,
+                        "issue_description": None,
+                        "issue_type": None,
+                        "advice_content": None,
+                        "description": None,
+                    },
+                }
+
             result = json.loads(response.choices[0].message.content)
 
             # Ensure required keys exist
@@ -384,6 +429,9 @@ EXAMPLES:
 
     def classify_with_fallback(self, text: str, conversation_history: list | None = None) -> dict:
         result = self.classify(text, conversation_history)
+
+        if result["intent"] == "service_unavailable":
+            return result
 
         if result["intent"] == "unknown" or result.get("confidence", 0) < 0.3:
             from intents.classifier import IntentClassifier

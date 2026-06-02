@@ -15,6 +15,20 @@ class AssistantPipeline:
         # Use Groq for intent classification and entity extraction
         groq_result = self.classifier.classify_with_fallback(translated_text, conversation_history)
 
+        # If service is unavailable, return immediately (skip regex, logging)
+        if groq_result["intent"] == "service_unavailable":
+            return {
+                "input": text,
+                "translated": translated_text,
+                "language": detected_lang,
+                "intent": {
+                    "intent": "service_unavailable",
+                    "confidence": 1.0,
+                    "method": groq_result["method"],
+                },
+                "entities": {},
+            }
+
         # Extract entities from Groq response
         groq_entities = groq_result.get("entities", {})
 
