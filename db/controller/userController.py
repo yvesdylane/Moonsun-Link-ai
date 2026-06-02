@@ -312,6 +312,10 @@ def get_user_info(user_id: str) -> Optional[User]:
     cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     row = cur.fetchone()
     cur.close()
+    if row:
+        print(f"[DB] get_user_info({user_id}) -> verified='{row[14]}', role='{row[5]}', name='{row[2]}', region='{row[6]}'")
+    else:
+        print(f"[DB] get_user_info({user_id}) -> NOT FOUND")
     return User.from_db_row(row) if row else None
 
 def update_user_info(user_id: str, updates: dict) -> dict:

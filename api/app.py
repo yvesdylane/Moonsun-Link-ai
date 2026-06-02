@@ -144,8 +144,22 @@ async def _handle_webhook(data: dict):
         update_user_chat_id(str(user_id), chat_id)
 
     result = router.handle(message, str(user_id), image_url=image_url)
-    print(f"MESSAGE: {message}")
-    print(f"RESULT: {result}")
+
+    print(f"\n===== WHATSAPP DEBUG =====")
+    print(f"Platform: WhatsApp")
+    print(f"Phone: {phone}")
+    print(f"DB User UUID: {user_id}")
+    from db.controller.userController import get_user_info
+    db_user = get_user_info(str(user_id))
+    if db_user:
+        print(f"DB User verified field: '{db_user.verified}'")
+        print(f"DB User role: {db_user.role}")
+        print(f"DB User name: {db_user.name}")
+    print(f"User message: {message}")
+    out = result.get("message", "") or result.get("data", "")
+    print(f"Bot reply (first 500): {str(out)[:500]}")
+    print(f"Result keys: {list(result.keys())}")
+    print(f"==========================\n")
 
     # Handle notifications (seller, buyer, farmer)
     if result.get("seller_notification"):

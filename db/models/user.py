@@ -17,6 +17,7 @@ class User:
     telegram_id: Optional[str]
     telegram_number: Optional[str]
     whatsapp_number: Optional[str]
+    whatsapp_chat_id: Optional[str]
     lang: str  # 'en', 'fr'
     pic_folder: Optional[str]
     created_at: datetime
@@ -31,8 +32,9 @@ class User:
         Create User from database row tuple.
         Expected order from SELECT * FROM users:
         (id, user_id, name, phone, email, role, region, telegram_id,
-         telegram_number, whatsapp_number, lang, pic_folder, created_at,
-         updated_at, verified, linking_code, code_expire_at)
+         telegram_number, whatsapp_number, whatsapp_chat_id, lang,
+         pic_folder, verified, linking_code, code_expire_at,
+         created_at, updated_at)
         """
         return cls(
             id=row[0],
@@ -45,13 +47,14 @@ class User:
             telegram_id=row[7],
             telegram_number=row[8],
             whatsapp_number=row[9],
-            lang=row[10],
-            pic_folder=row[11],
-            created_at=row[12],
-            updated_at=row[13],
-            verified=row[14],
-            linking_code=row[15],
-            code_expire_at=row[16]
+            whatsapp_chat_id=row[10],
+            lang=row[11],
+            pic_folder=row[12],
+            verified=row[13],
+            linking_code=row[14],
+            code_expire_at=row[15],
+            created_at=row[16],
+            updated_at=row[17]
         )
 
     def is_farmer(self) -> bool:

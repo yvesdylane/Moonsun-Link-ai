@@ -53,6 +53,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Just send me a message — I understand text and voice 🎙️",
                 user_lang
             )
+        print(f"reply:{reply}")
         await update.message.reply_text(reply)
         return
 
@@ -556,6 +557,22 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
         user_id = None
 
     result = router.handle(message, str(user_id) if user_id else None)
+
+    print(f"\n===== TELEGRAM DEBUG =====")
+    print(f"Platform: Telegram")
+    print(f"Telegram ID: {telegram_id}")
+    print(f"DB User UUID: {user_id}")
+    from db.controller.userController import get_user_info
+    db_user = get_user_info(str(user_id)) if user_id else None
+    if db_user:
+        print(f"DB User verified field: '{db_user.verified}'")
+        print(f"DB User role: {db_user.role}")
+        print(f"DB User name: {db_user.name}")
+    print(f"User message: {message}")
+    out = result.get("message", "") or result.get("data", "")
+    print(f"Bot reply (first 500): {str(out)[:500]}")
+    print(f"Result keys: {list(result.keys())}")
+    print(f"==========================\n")
 
     # Handle notifications (seller, buyer, farmer)
     if result.get("seller_notification"):
