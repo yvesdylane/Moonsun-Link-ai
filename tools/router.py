@@ -988,10 +988,13 @@ class ToolRouter:
         quantity = entities.get("quantity") or 1
 
         if not listing_number:
-            return {
-                "status": "error",
-                "message": "Which listing are you interested in?\n\nExample: 'I'm interested in 40kg of listing #2'"
-            }
+            import re
+            conv = state.get("context", {}).get("conversation", [])
+            for turn in reversed(conv):
+                match = re.search(r'#(\d+)', turn.get("content", ""))
+                if match:
+                    listing_number = int(match.group(1))
+                    break
 
         try:
             listing_index = int(listing_number) - 1
@@ -1174,10 +1177,13 @@ class ToolRouter:
         listing_number = entities.get("listing_number")
 
         if not listing_number:
-            return {
-                "status": "error",
-                "message": "Which listing photo would you like to see?\n\nExample: 'show image of listing #2'"
-            }
+            import re
+            conv = state.get("context", {}).get("conversation", [])
+            for turn in reversed(conv):
+                match = re.search(r'#(\d+)', turn.get("content", ""))
+                if match:
+                    listing_number = int(match.group(1))
+                    break
 
         try:
             listing_index = int(listing_number) - 1
@@ -1235,10 +1241,13 @@ class ToolRouter:
         listing_number = entities.get("listing_number")
 
         if not listing_number:
-            return {
-                "status": "error",
-                "message": "Which listing would you like details for?\n\nExample: 'show details of listing #2'"
-            }
+            import re
+            conv = state.get("context", {}).get("conversation", [])
+            for turn in reversed(conv):
+                match = re.search(r'#(\d+)', turn.get("content", ""))
+                if match:
+                    listing_number = int(match.group(1))
+                    break
 
         try:
             listing_index = int(listing_number) - 1
