@@ -222,3 +222,92 @@ def calculate_overall_avg(product_id: int) -> float:
     result = cur.fetchone()
     cur.close()
     return result['avg_price'] if result and result['avg_price'] else None
+
+
+def create_product_price(product_id: int, region: str, min_price: int,
+                         max_price: int, avg_price: int) -> dict:
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO product_prices (product_id, region, min_price, max_price, avg_price)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING *
+        """, (product_id, region, min_price, max_price, avg_price))
+        price = cur.fetchone()
+        conn.commit()
+        if not price:
+            return {"status": "error", "message": "Failed to create product price"}
+        return {"status": "ok", "product_price": price}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        cur.close()
+
+
+def get_product_prices(product_id: int = None, region: str = None) -> list[dict]:
+    cur = conn.cursor()
+    try:
+        conditions = []
+        params = []
+        if product_id:
+            conditions.append("pp.product_id = %s")
+            params.append(product_id)
+        if region:
+            conditions.append("pp.region = %s")
+            params.append(region)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        cur.execute(f"""
+            SELECT pp.*, p.name AS product_name, p.type AS product_type
+            FROM product_prices pp
+            JOIN products p ON pp.product_id = p.id
+            {where}
+            ORDER BY p.name, pp.region
+        """, params)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+
+def update_product_price(price_id: int, updates: dict) -> dict:
+    if not updates:
+        return {"status": "error", "message": "Nothing to update"}
+    fields = [f"{key} = %s" for key in updates.keys()]
+    values = list(updates.values())
+    values.append(price_id)
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            UPDATE product_prices
+            SET {', '.join(fields)}, updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+        """, values)
+        updated = cur.fetchone()
+        conn.commit()
+        if not updated:
+            return {"status": "error", "message": "Product price not found"}
+        return {"status": "ok", "product_price": updated}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        cur.close()
+
+
+def delete_product_price(price_id: int) -> dict:
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM product_prices WHERE id = %s RETURNING id", (price_id,))
+        deleted = cur.fetchone()
+        conn.commit()
+        if not deleted:
+            return {"status": "error", "message": "Product price not found"}
+        return {"status": "ok", "message": "Product price deleted"}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        cur.close()

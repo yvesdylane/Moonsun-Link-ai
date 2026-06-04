@@ -32,6 +32,12 @@ from db.controller.productController import (
     delete_product as _delete_product,
 )
 from db.connect import conn as _db_conn
+from db.controller.productPriceController import (
+    create_product_price as _create_product_price,
+    get_product_prices as _get_product_prices,
+    update_product_price as _update_product_price,
+    delete_product_price as _delete_product_price,
+)
 
 router = APIRouter(tags=["Admin"])
 
@@ -98,6 +104,21 @@ class UpdateProductRequest(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     default_measurement: Optional[str] = None
+
+
+class CreateProductPriceRequest(BaseModel):
+    product_id: int
+    region: str
+    min_price: int
+    max_price: int
+    avg_price: int
+
+
+class UpdateProductPriceRequest(BaseModel):
+    region: Optional[str] = None
+    min_price: Optional[int] = None
+    max_price: Optional[int] = None
+    avg_price: Optional[int] = None
 
 
 # ── Auth ────────────────────────────────────────────────────────────────
@@ -759,6 +780,119 @@ def admin_delete_product(product_id: int, _auth=Depends(get_current_admin)):
         raise
     except Exception as e:
         print(f"ADMIN DELETE PRODUCT ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Product Prices ──────────────────────────────────────────────────────
+
+VALID_REGIONS = (
+    "Adamaoua", "Centre", "Est", "Extreme-Nord", "Littoral",
+    "Nord", "Nord-Ouest", "Ouest", "Sud", "Sud-Ouest", "General",
+)
+
+
+@router.post("/product-prices")
+def admin_create_product_price(body: CreateProductPriceRequest, _auth=Depends(get_current_admin)):
+    try:
+        if body.region not in VALID_REGIONS:
+            raise HTTPException(status_code=400, detail=f"Invalid region. Must be one of: {', '.join(VALID_REGIONS)}")
+        if not (body.min_price <= body.avg_price <= body.max_price):
+            raise HTTPException(status_code=400, detail="Must satisfy: min_price <= avg_price <= max_price")
+        result = _create_product_price(body.product_id, body.region, body.min_price, body.max_price, body.avg_price)
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["message"])
+        return {"status": "ok", "data": result["product_price"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN CREATE PRODUCT PRICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/product-prices")
+def admin_list_product_prices(
+    product_id: Optional[int] = Query(None),
+    region: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        if region and region not in VALID_REGIONS:
+            raise HTTPException(status_code=400, detail=f"Invalid region. Must be one of: {', '.join(VALID_REGIONS)}")
+        prices = _get_product_prices(product_id=product_id, region=region)
+        return {"status": "ok", "data": prices}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN LIST PRODUCT PRICES ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/product-prices/{price_id}")
+def admin_get_product_price(price_id: int, _auth=Depends(get_current_admin)):
+    try:
+        cur = _db_conn.cursor()
+        cur.execute("""
+            SELECT pp.*, p.name AS product_name, p.type AS product_type
+            FROM product_prices pp
+            JOIN products p ON pp.product_id = p.id
+            WHERE pp.id = %s
+        """, (price_id,))
+        price = cur.fetchone()
+        cur.close()
+        if not price:
+            raise HTTPException(status_code=404, detail="Product price not found")
+        return {"status": "ok", "data": price}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET PRODUCT PRICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.patch("/product-prices/{price_id}")
+def admin_update_product_price(price_id: int, body: UpdateProductPriceRequest, _auth=Depends(get_current_admin)):
+    try:
+        updates = {}
+        if body.region is not None:
+            if body.region not in VALID_REGIONS:
+                raise HTTPException(status_code=400, detail=f"Invalid region. Must be one of: {', '.join(VALID_REGIONS)}")
+            updates["region"] = body.region
+        if body.min_price is not None:
+            updates["min_price"] = body.min_price
+        if body.max_price is not None:
+            updates["max_price"] = body.max_price
+        if body.avg_price is not None:
+            updates["avg_price"] = body.avg_price
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        result = _update_product_price(price_id, updates)
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+        return {"status": "ok", "data": result["product_price"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN UPDATE PRODUCT PRICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/product-prices/{price_id}")
+def admin_delete_product_price(price_id: int, _auth=Depends(get_current_admin)):
+    try:
+        result = _delete_product_price(price_id)
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+        return {"status": "ok", "message": "Product price deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN DELETE PRODUCT PRICE ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 
