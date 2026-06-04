@@ -51,3 +51,29 @@ def get_all_user_contacts(region: str = None) -> list[dict]:
         return cur.fetchall()
     finally:
         cur.close()
+
+
+def get_alerts(alert_type: str = None, region: str = None) -> list[dict]:
+    cur = conn.cursor()
+    try:
+        conditions = []
+        params = []
+        if alert_type:
+            conditions.append("a.alert_type = %s")
+            params.append(alert_type)
+        if region:
+            conditions.append("a.region = %s")
+            params.append(region)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        cur.execute(f"""
+            SELECT a.*, u.name AS created_by_name
+            FROM alerts a
+            JOIN users u ON a.created_by = u.id
+            {where}
+            ORDER BY a.created_at DESC
+        """, params)
+        return cur.fetchall()
+    finally:
+        cur.close()

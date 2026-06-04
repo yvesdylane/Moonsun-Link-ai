@@ -16,7 +16,7 @@ from db.controller.userController import (
 from db.controller.listingController import delete_listing, get_listing_details as _get_listing_details
 from db.controller.reportController import get_reports
 from db.controller.issueController import get_issues
-from db.controller.alertController import create_alert as _create_alert, get_all_user_contacts
+from db.controller.alertController import create_alert as _create_alert, get_all_user_contacts, get_alerts as _get_alerts
 
 router = APIRouter(tags=["Admin"])
 
@@ -507,6 +507,28 @@ def admin_update_issue(issue_id: int, body: UpdateIssueRequest, _auth=Depends(ge
 # ── Alerts ──────────────────────────────────────────────────────────────
 
 VALID_ALERT_TYPES = ("disease_outbreak", "product_shortage", "general")
+
+
+@router.get("/alerts")
+def admin_list_alerts(
+    alert_type: Optional[str] = Query(None),
+    region: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        if alert_type and alert_type not in VALID_ALERT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid alert_type. Must be one of: {', '.join(VALID_ALERT_TYPES)}"
+            )
+        alerts = _get_alerts(alert_type=alert_type, region=region)
+        return {"status": "ok", "data": alerts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN LIST ALERTS ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/alerts")
