@@ -18,6 +18,18 @@ from db.controller.reportController import get_reports
 from db.controller.issueController import get_issues
 from db.controller.alertController import create_alert as _create_alert, get_all_user_contacts, get_alerts as _get_alerts
 from db.controller.listingInterestController import get_all_interests as _get_all_interests
+from db.controller.messageLogController import (
+    get_message_logs as _get_message_logs,
+    get_message_log as _get_message_log,
+)
+from db.controller.logController import (
+    get_assistant_logs as _get_assistant_logs,
+    get_assistant_log as _get_assistant_log,
+)
+from db.controller.stateController import (
+    get_all_conversation_states as _get_all_conversation_states,
+    get_conversation_state_detail as _get_conversation_state_detail,
+)
 from db.controller.locationController import (
     create_location as _create_location,
     get_location as _get_location,
@@ -1079,6 +1091,99 @@ def admin_delete_location(location_id: int, _auth=Depends(get_current_admin)):
         raise
     except Exception as e:
         print(f"ADMIN DELETE LOCATION ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Logs (Read-only) ────────────────────────────────────────────────────
+
+
+@router.get("/logs/messages")
+def admin_list_message_logs(
+    platform: Optional[str] = Query(None),
+    intent: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        logs = _get_message_logs(platform=platform, intent=intent, user_id=user_id)
+        return {"status": "ok", "data": logs}
+    except Exception as e:
+        print(f"ADMIN LIST MESSAGE LOGS ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/logs/messages/{log_id}")
+def admin_get_message_log(log_id: int, _auth=Depends(get_current_admin)):
+    try:
+        log = _get_message_log(log_id)
+        if not log:
+            raise HTTPException(status_code=404, detail="Message log not found")
+        return {"status": "ok", "data": log}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET MESSAGE LOG ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/logs/assistant")
+def admin_list_assistant_logs(
+    intent: Optional[str] = Query(None),
+    method: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        logs = _get_assistant_logs(intent=intent, method=method)
+        return {"status": "ok", "data": logs}
+    except Exception as e:
+        print(f"ADMIN LIST ASSISTANT LOGS ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/logs/assistant/{log_id}")
+def admin_get_assistant_log(log_id: int, _auth=Depends(get_current_admin)):
+    try:
+        log = _get_assistant_log(log_id)
+        if not log:
+            raise HTTPException(status_code=404, detail="Assistant log not found")
+        return {"status": "ok", "data": log}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET ASSISTANT LOG ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/logs/states")
+def admin_list_conversation_states(
+    state: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        states = _get_all_conversation_states(state=state)
+        return {"status": "ok", "data": states}
+    except Exception as e:
+        print(f"ADMIN LIST CONVERSATION STATES ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/logs/states/{state_id}")
+def admin_get_conversation_state(state_id: int, _auth=Depends(get_current_admin)):
+    try:
+        state = _get_conversation_state_detail(state_id)
+        if not state:
+            raise HTTPException(status_code=404, detail="Conversation state not found")
+        return {"status": "ok", "data": state}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET CONVERSATION STATE ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 

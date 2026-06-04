@@ -29,6 +29,43 @@ def set_state(user_id: str, state: str, context: dict = {}):
     conn.commit()
     cur.close()
 
+def get_all_conversation_states(state: str = None) -> list[dict]:
+    cur = conn.cursor(row_factory=dict_row)
+    try:
+        if state:
+            cur.execute("""
+                SELECT cs.*, u.name AS user_name, u.phone AS user_phone
+                FROM conversation_state cs
+                JOIN users u ON cs.user_id = u.id
+                WHERE cs.state = %s
+                ORDER BY cs.updated_at DESC
+            """, (state,))
+        else:
+            cur.execute("""
+                SELECT cs.*, u.name AS user_name, u.phone AS user_phone
+                FROM conversation_state cs
+                JOIN users u ON cs.user_id = u.id
+                ORDER BY cs.updated_at DESC
+            """)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+
+def get_conversation_state_detail(state_id: int) -> dict | None:
+    cur = conn.cursor(row_factory=dict_row)
+    try:
+        cur.execute("""
+            SELECT cs.*, u.name AS user_name, u.phone AS user_phone
+            FROM conversation_state cs
+            JOIN users u ON cs.user_id = u.id
+            WHERE cs.id = %s
+        """, (state_id,))
+        return cur.fetchone()
+    finally:
+        cur.close()
+
+
 def clear_state(user_id: str):
     cur = conn.cursor()
     cur.execute("DELETE FROM conversation_state WHERE user_id = %s", (user_id,))
