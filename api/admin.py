@@ -17,6 +17,13 @@ from db.controller.listingController import delete_listing, get_listing_details 
 from db.controller.reportController import get_reports
 from db.controller.issueController import get_issues
 from db.controller.alertController import create_alert as _create_alert, get_all_user_contacts, get_alerts as _get_alerts
+from db.controller.adviceController import (
+    create_advice as _create_advice,
+    get_advice as _get_advice,
+    get_all_advice as _get_all_advice,
+    update_advice as _update_advice,
+    delete_advice as _delete_advice,
+)
 
 router = APIRouter(tags=["Admin"])
 
@@ -53,6 +60,24 @@ class CreateAlertRequest(BaseModel):
     product_name: Optional[str] = None
     source_report_id: Optional[int] = None
     expires_at: Optional[str] = None
+
+
+class CreateAdviceRequest(BaseModel):
+    title: str
+    content: str
+    issue_id: Optional[int] = None
+    product_name: Optional[str] = None
+    issue_type: Optional[str] = None
+    is_verified: bool = False
+
+
+class UpdateAdviceRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    issue_id: Optional[int] = None
+    product_name: Optional[str] = None
+    issue_type: Optional[str] = None
+    is_verified: Optional[bool] = None
 
 
 # ── Auth ────────────────────────────────────────────────────────────────
@@ -500,6 +525,109 @@ def admin_update_issue(issue_id: int, body: UpdateIssueRequest, _auth=Depends(ge
         raise
     except Exception as e:
         print(f"ADMIN UPDATE ISSUE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Advice ──────────────────────────────────────────────────────────────
+
+
+@router.post("/advice")
+def admin_create_advice(body: CreateAdviceRequest, _auth=Depends(get_current_admin)):
+    try:
+        admin_user_id, _ = _auth
+        result = _create_advice(
+            title=body.title, content=body.content, author_id=admin_user_id,
+            issue_id=body.issue_id, product_name=body.product_name,
+            issue_type=body.issue_type, is_verified=body.is_verified,
+        )
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["message"])
+        return {"status": "ok", "data": result["advice"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN CREATE ADVICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/advice")
+def admin_list_advice(
+    product_name: Optional[str] = Query(None),
+    issue_type: Optional[str] = Query(None),
+    is_verified: Optional[bool] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        items = _get_all_advice(
+            product_name=product_name, issue_type=issue_type, is_verified=is_verified,
+        )
+        return {"status": "ok", "data": items}
+    except Exception as e:
+        print(f"ADMIN LIST ADVICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/advice/{advice_id}")
+def admin_get_advice(advice_id: int, _auth=Depends(get_current_admin)):
+    try:
+        item = _get_advice(advice_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Advice not found")
+        return {"status": "ok", "data": item}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET ADVICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.patch("/advice/{advice_id}")
+def admin_update_advice(advice_id: int, body: UpdateAdviceRequest, _auth=Depends(get_current_admin)):
+    try:
+        updates = {}
+        if body.title is not None:
+            updates["title"] = body.title
+        if body.content is not None:
+            updates["content"] = body.content
+        if body.issue_id is not None:
+            updates["issue_id"] = body.issue_id
+        if body.product_name is not None:
+            updates["product_name"] = body.product_name
+        if body.issue_type is not None:
+            updates["issue_type"] = body.issue_type
+        if body.is_verified is not None:
+            updates["is_verified"] = body.is_verified
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        result = _update_advice(advice_id, updates)
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+        return {"status": "ok", "data": result["advice"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN UPDATE ADVICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/advice/{advice_id}")
+def admin_delete_advice(advice_id: int, _auth=Depends(get_current_admin)):
+    try:
+        result = _delete_advice(advice_id)
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+        return {"status": "ok", "message": "Advice deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN DELETE ADVICE ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 
