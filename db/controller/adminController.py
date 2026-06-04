@@ -200,13 +200,7 @@ def get_pending_verifications() -> list[dict]:
         results = []
         for r in rows:
             d = dict(r)
-            pic_folder = d.get("pic_folder", "")
-            d["selfie_url"] = None
-            d["id_url"] = None
-            if pic_folder:
-                from utils.cloudinary_uploader import get_cloudinary_url
-                d["selfie_url"] = get_cloudinary_url(f"{pic_folder}/selfie")
-                d["id_url"] = get_cloudinary_url(f"{pic_folder}/id")
+            d["folder_url"] = d.get("pic_folder") or None
             for k, v in d.items():
                 if hasattr(v, 'isoformat'):
                     d[k] = v.isoformat()

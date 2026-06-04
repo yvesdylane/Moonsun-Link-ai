@@ -171,6 +171,8 @@ def admin_get_user(user_id: str, _auth=Depends(get_current_admin)):
 def admin_update_user(user_id: str, body: UpdateUserRequest, _auth=Depends(get_current_admin)):
     try:
         updates = {}
+        verified_changed = False
+        new_verified = None
         if body.name is not None:
             updates["name"] = body.name
         if body.role is not None:
@@ -183,6 +185,8 @@ def admin_update_user(user_id: str, body: UpdateUserRequest, _auth=Depends(get_c
             if body.verified not in valid_ver:
                 raise HTTPException(status_code=400, detail=f"Invalid verified value. Must be one of: {', '.join(valid_ver)}")
             updates["verified"] = body.verified
+            verified_changed = True
+            new_verified = body.verified
         if body.region is not None:
             updates["region"] = body.region
 
@@ -192,7 +196,45 @@ def admin_update_user(user_id: str, body: UpdateUserRequest, _auth=Depends(get_c
         result = update_user_info(user_id, updates)
         if result["status"] == "error":
             raise HTTPException(status_code=404, detail=result["message"])
-        return {"status": "ok", "message": "User updated", "data": result.get("user")}
+
+        user = result.get("user")
+
+        if verified_changed and new_verified in ("true", "false"):
+            from utils.whatsapp import send_whatsapp_reply
+            if new_verified == "true":
+                notification = (
+                    "✅ *Account Verified!*\n\n"
+                    "Your Moonso Link account has been verified. "
+                    "Your listings are now visible to all buyers! 🎉"
+                )
+            else:
+                notification = (
+                    "❌ *Verification Revoked*\n\n"
+                    "Your account verification status has been changed to not verified. "
+                    "If you believe this is an error, please contact support."
+                )
+            whatsapp_chat_id = user.get("whatsapp_chat_id")
+            telegram_id = user.get("telegram_id")
+            if whatsapp_chat_id:
+                try:
+                    send_whatsapp_reply(whatsapp_chat_id, notification)
+                except Exception as e:
+                    print(f"ADMIN PATCH VERIFY WHATSAPP NOTIFY ERROR: {e}")
+            if telegram_id:
+                try:
+                    import os
+                    import requests
+                    tg_token = os.getenv("TELEGRAM_TOKEN")
+                    if tg_token:
+                        requests.post(
+                            f"https://api.telegram.org/bot{tg_token}/sendMessage",
+                            json={"chat_id": telegram_id, "text": notification, "parse_mode": "Markdown"},
+                            timeout=10,
+                        )
+                except Exception as e:
+                    print(f"ADMIN PATCH VERIFY TELEGRAM NOTIFY ERROR: {e}")
+
+        return {"status": "ok", "message": "User updated", "data": user}
     except HTTPException:
         raise
     except Exception as e:

@@ -377,14 +377,19 @@ def submit_verification_files(user_id: str, selfie_url: str, id_url: str) -> dic
     """
     Submit verification files and set user status to 'pending'.
     The files should already be uploaded to Cloudinary at moonso/users/{user_id}/.
+
+    Stores the full Cloudinary folder URL (e.g. "https://res.cloudinary.com/.../moonso/users/{uuid}")
+    in pic_folder so admins can click it directly.
     """
+    folder_url = selfie_url.rsplit("/", 1)[0] if selfie_url else f"moonso/users/{user_id}"
+
     cur = conn.cursor()
     cur.execute("""
         UPDATE users
         SET pic_folder = %s, verified = 'pending', updated_at = NOW()
         WHERE id = %s
         RETURNING id
-    """, (f"moonso/users/{user_id}", user_id))
+    """, (folder_url, user_id))
     result = cur.fetchone()
     conn.commit()
     cur.close()

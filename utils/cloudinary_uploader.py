@@ -27,21 +27,3 @@ def upload_image(file_path: str) -> str | None:
         print(f"CLOUDINARY ERROR: {e}")
         return None
 
-
-def get_cloudinary_url(public_id: str, resource_type: str = "image") -> str | None:
-    """
-    Get the secure URL for a Cloudinary resource by its public_id.
-
-    Args:
-        public_id: The full public ID (e.g. "moonso/users/{uuid}/selfie_{uuid}")
-        resource_type: 'image', 'raw', 'video', or 'auto'
-
-    Returns:
-        The secure URL string, or None if not found.
-    """
-    try:
-        result = cloudinary.api.resource(public_id, resource_type=resource_type)
-        return result.get("secure_url")
-    except Exception as e:
-        print(f"CLOUDINARY RESOURCE LOOKUP ERROR ({public_id}): {e}")
-        return None
