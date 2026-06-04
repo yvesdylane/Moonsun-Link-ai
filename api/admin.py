@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 import traceback
@@ -30,6 +30,7 @@ from db.controller.stateController import (
     get_all_conversation_states as _get_all_conversation_states,
     get_conversation_state_detail as _get_conversation_state_detail,
 )
+from utils.rate_limiter import limiter
 from db.controller.locationController import (
     create_location as _create_location,
     get_location as _get_location,
@@ -156,7 +157,8 @@ class UpdateLocationRequest(BaseModel):
 # ── Auth ────────────────────────────────────────────────────────────────
 
 @router.post("/login")
-def admin_login(body: LoginRequest):
+@limiter.limit("5/minute")
+def admin_login(request: Request, body: LoginRequest):
     try:
         phone = body.phone.strip()
         if not phone.startswith("+237"):
@@ -189,7 +191,8 @@ def admin_login(body: LoginRequest):
 
 
 @router.post("/verify")
-def admin_verify(body: VerifyRequest):
+@limiter.limit("10/minute")
+def admin_verify(request: Request, body: VerifyRequest):
     try:
         phone = body.phone.strip()
         if not phone.startswith("+237"):
@@ -1314,7 +1317,8 @@ def admin_list_alerts(
 
 
 @router.post("/alerts")
-def admin_create_alert(body: CreateAlertRequest, _auth=Depends(get_current_admin)):
+@limiter.limit("5/minute")
+def admin_create_alert(request: Request, body: CreateAlertRequest, _auth=Depends(get_current_admin)):
     try:
         admin_user_id, _ = _auth
 
