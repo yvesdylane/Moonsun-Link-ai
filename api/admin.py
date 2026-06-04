@@ -17,6 +17,7 @@ from db.controller.listingController import delete_listing, get_listing_details 
 from db.controller.reportController import get_reports
 from db.controller.issueController import get_issues
 from db.controller.alertController import create_alert as _create_alert, get_all_user_contacts, get_alerts as _get_alerts
+from db.controller.listingInterestController import get_all_interests as _get_all_interests
 from db.controller.adviceController import (
     create_advice as _create_advice,
     get_advice as _get_advice,
@@ -374,6 +375,61 @@ def admin_delete_listing(listing_id: int, _auth=Depends(get_current_admin)):
         raise
     except Exception as e:
         print(f"ADMIN DELETE LISTING ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Listing Interests ───────────────────────────────────────────────────
+
+
+@router.get("/interests")
+def admin_list_interests(
+    status: Optional[str] = Query(None),
+    listing_id: Optional[int] = Query(None),
+    user_id: Optional[str] = Query(None),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        valid_statuses = ("active", "cancelled_by_buyer", "rejected_by_farmer")
+        if status and status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+            )
+        interests = _get_all_interests(status=status, listing_id=listing_id, user_id=user_id)
+        return {"status": "ok", "data": interests}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN LIST INTERESTS ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/interests/{interest_id}")
+def admin_get_interest(interest_id: int, _auth=Depends(get_current_admin)):
+    try:
+        cur = _db_conn.cursor()
+        cur.execute("""
+            SELECT li.*, p.name AS product_name,
+                   buyer.name AS buyer_name, buyer.phone AS buyer_phone,
+                   seller.name AS seller_name, seller.phone AS seller_phone
+            FROM listing_interests li
+            JOIN listings l ON li.listing_id = l.id
+            JOIN products p ON l.product_id = p.id
+            JOIN users buyer ON li.user_id = buyer.id
+            JOIN users seller ON l.user_id = seller.id
+            WHERE li.id = %s
+        """, (interest_id,))
+        interest = cur.fetchone()
+        cur.close()
+        if not interest:
+            raise HTTPException(status_code=404, detail="Interest not found")
+        return {"status": "ok", "data": interest}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET INTEREST ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 

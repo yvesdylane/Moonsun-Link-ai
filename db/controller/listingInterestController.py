@@ -385,3 +385,39 @@ def reject_interest(interest_id: int, farmer_id: str) -> dict:
         cur.close()
         print(f"REJECT INTEREST ERROR: {e}")
         return {"status": "error", "message": "Failed to reject interest"}
+
+
+def get_all_interests(status: str = None, listing_id: int = None,
+                      user_id: str = None) -> list[dict]:
+    """Admin view: list all listing interests with filters."""
+    cur = conn.cursor(row_factory=dict_row)
+    try:
+        conditions = []
+        values = []
+        if status:
+            conditions.append("li.status = %s")
+            values.append(status)
+        if listing_id:
+            conditions.append("li.listing_id = %s")
+            values.append(listing_id)
+        if user_id:
+            conditions.append("li.user_id = %s")
+            values.append(user_id)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        cur.execute(f"""
+            SELECT li.*, p.name AS product_name,
+                   buyer.name AS buyer_name, buyer.phone AS buyer_phone,
+                   seller.name AS seller_name, seller.phone AS seller_phone
+            FROM listing_interests li
+            JOIN listings l ON li.listing_id = l.id
+            JOIN products p ON l.product_id = p.id
+            JOIN users buyer ON li.user_id = buyer.id
+            JOIN users seller ON l.user_id = seller.id
+            {where}
+            ORDER BY li.created_at DESC
+        """, values)
+        return cur.fetchall()
+    finally:
+        cur.close()
