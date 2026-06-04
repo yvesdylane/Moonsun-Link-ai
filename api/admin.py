@@ -24,6 +24,14 @@ from db.controller.adviceController import (
     update_advice as _update_advice,
     delete_advice as _delete_advice,
 )
+from db.controller.productController import (
+    create_product as _create_product,
+    get_all_products as _get_all_products,
+    get_product_info as _get_product_info,
+    update_product as _update_product,
+    delete_product as _delete_product,
+)
+from db.connect import conn as _db_conn
 
 router = APIRouter(tags=["Admin"])
 
@@ -78,6 +86,18 @@ class UpdateAdviceRequest(BaseModel):
     product_name: Optional[str] = None
     issue_type: Optional[str] = None
     is_verified: Optional[bool] = None
+
+
+class CreateProductRequest(BaseModel):
+    name: str
+    type: str
+    default_measurement: Optional[str] = None
+
+
+class UpdateProductRequest(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    default_measurement: Optional[str] = None
 
 
 # ── Auth ────────────────────────────────────────────────────────────────
@@ -628,6 +648,117 @@ def admin_delete_advice(advice_id: int, _auth=Depends(get_current_admin)):
         raise
     except Exception as e:
         print(f"ADMIN DELETE ADVICE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ── Products ────────────────────────────────────────────────────────────
+
+VALID_PRODUCT_TYPES = ("crop", "animal", "tool", "service")
+
+
+@router.post("/products")
+def admin_create_product(body: CreateProductRequest, _auth=Depends(get_current_admin)):
+    try:
+        if body.type not in VALID_PRODUCT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid type. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}"
+            )
+        product_id = _create_product(body.name, body.type, body.default_measurement)
+        if not product_id:
+            raise HTTPException(status_code=400, detail="Failed to create product (may already exist)")
+        product = _get_product_info(body.name)
+        return {"status": "ok", "data": product}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN CREATE PRODUCT ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/products")
+def admin_list_products(
+    type: Optional[str] = Query(None, alias="type"),
+    _auth=Depends(get_current_admin),
+):
+    try:
+        if type and type not in VALID_PRODUCT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid type filter. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}"
+            )
+        products = _get_all_products(product_type=type)
+        return {"status": "ok", "data": products}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN LIST PRODUCTS ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/products/{product_id}")
+def admin_get_product(product_id: int, _auth=Depends(get_current_admin)):
+    try:
+        cur = _db_conn.cursor()
+        cur.execute("SELECT * FROM products WHERE id = %s", (product_id,))
+        product = cur.fetchone()
+        cur.close()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return {"status": "ok", "data": product}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN GET PRODUCT ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.patch("/products/{product_id}")
+def admin_update_product(product_id: int, body: UpdateProductRequest, _auth=Depends(get_current_admin)):
+    try:
+        updates = {}
+        if body.name is not None:
+            updates["name"] = body.name.strip().lower()
+        if body.type is not None:
+            if body.type not in VALID_PRODUCT_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid type. Must be one of: {', '.join(VALID_PRODUCT_TYPES)}"
+                )
+            updates["type"] = body.type
+        if body.default_measurement is not None:
+            updates["default_measurement"] = body.default_measurement
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        result = _update_product(product_id, updates)
+        if result["status"] == "error":
+            raise HTTPException(status_code=404, detail=result["message"])
+        return {"status": "ok", "data": result["product"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN UPDATE PRODUCT ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/products/{product_id}")
+def admin_delete_product(product_id: int, _auth=Depends(get_current_admin)):
+    try:
+        result = _delete_product(product_id)
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["message"])
+        return {"status": "ok", "message": "Product deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ADMIN DELETE PRODUCT ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
 

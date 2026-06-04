@@ -59,3 +59,71 @@ def create_product(name: str, product_type: str, default_measurement: str = None
         cur.close()
         print(f"PRODUCT CREATE ERROR: {e}")
         return None
+
+
+def get_all_products(product_type: str = None) -> list[dict]:
+    cur = conn.cursor()
+    try:
+        if product_type:
+            cur.execute("""
+                SELECT * FROM products WHERE type = %s ORDER BY name
+            """, (product_type,))
+        else:
+            cur.execute("""
+                SELECT * FROM products ORDER BY name
+            """)
+        return cur.fetchall()
+    finally:
+        cur.close()
+
+
+def update_product(product_id: int, updates: dict) -> dict:
+    if not updates:
+        return {"status": "error", "message": "Nothing to update"}
+
+    fields = [f"{key} = %s" for key in updates.keys()]
+    values = list(updates.values())
+    values.append(product_id)
+
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            UPDATE products
+            SET {', '.join(fields)}, updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+        """, values)
+        updated = cur.fetchone()
+        conn.commit()
+        if not updated:
+            return {"status": "error", "message": "Product not found"}
+        return {"status": "ok", "product": updated}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        cur.close()
+
+
+def delete_product(product_id: int) -> dict:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) AS cnt FROM listings WHERE product_id = %s", (product_id,))
+        count = cur.fetchone()["cnt"]
+        if count > 0:
+            return {
+                "status": "error",
+                "message": f"Cannot delete: {count} listing(s) still reference this product. Remove or reassign them first."
+            }
+
+        cur.execute("DELETE FROM products WHERE id = %s RETURNING id", (product_id,))
+        deleted = cur.fetchone()
+        conn.commit()
+        if not deleted:
+            return {"status": "error", "message": "Product not found"}
+        return {"status": "ok", "message": "Product deleted"}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        cur.close()
