@@ -17,6 +17,7 @@ from utils.cloudinary_uploader import upload_image
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from api.admin import router as admin_router
+from api.miniapp import router as miniapp_router
 import asyncio
 import os
 import traceback
@@ -59,6 +60,7 @@ app.add_middleware(
 )
 
 app.include_router(admin_router, prefix="/api/admin")
+app.include_router(miniapp_router, prefix="/api/miniapp")
 router = ToolRouter()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
