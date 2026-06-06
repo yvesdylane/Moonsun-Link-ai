@@ -271,6 +271,11 @@ def chat(request: MessageRequest):
     result = router.handle(request.message)
     return result
 
+@app.get("/telegram")
+async def telegram_webhook_get():
+    return {"status": "ok"}
+
+
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     try:
