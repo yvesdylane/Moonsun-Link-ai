@@ -13,7 +13,6 @@ import tempfile
 
 router = ToolRouter()
 LOGO_PATH = Path("Assets/logo.jpg")
-MARKET_URL = os.getenv("MINI_APP_URL", "https://moonsulink.vercel.app/miniapp")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from utils.translator import translate_reply
@@ -61,7 +60,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 Link WhatsApp account", callback_data="link_account")],
         [InlineKeyboardButton("💬 Start chatting as guest", callback_data="guest")],
-        [InlineKeyboardButton("🛒 Open Marketplace", web_app={"url": MARKET_URL})],
     ])
 
     caption = translate_reply(
@@ -884,17 +882,11 @@ async def send_telegram_notification(context: ContextTypes.DEFAULT_TYPE, notific
 async def send_telegram_reply(update: Update, result: dict):
     detected_lang = result.get("language", "en")
 
-    # Determine if we should show marketplace button (only for listing-related intents)
-    intent = result.get("intent", {}).get("intent", "unknown") if isinstance(result.get("intent"), dict) else "unknown"
-    account_intents = ["get_my_info", "verify_account", "change_role", "update_profile", "greeting"]
-    show_marketplace = intent not in account_intents
-
     if result.get("preview_image"):
         reply = translate_reply(result.get("message", "Done"), detected_lang)
         await update.message.reply_photo(
             photo=result["preview_image"],
             caption=reply,
-            reply_markup=market_button() if show_marketplace else None
         )
 
     elif "data" in result:
@@ -908,31 +900,18 @@ async def send_telegram_reply(update: Update, result: dict):
         if data["page"] < data["total_pages"]:
             keyboard.append(InlineKeyboardButton("Next ▶", callback_data="next"))
         keyboard_rows = [keyboard] if keyboard else []
-        keyboard_rows.append([InlineKeyboardButton("🛒 Open Marketplace", web_app={"url": MARKET_URL})])
         await update.message.reply_text(reply, reply_markup=InlineKeyboardMarkup(keyboard_rows))
 
     else:
         reply = translate_reply(result.get("message", "Done"), detected_lang)
-        await update.message.reply_text(reply, reply_markup=market_button() if show_marketplace else None)
+        await update.message.reply_text(reply)
 
 def setup_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("create", create_account))
-    app.add_handler(CommandHandler("market", market))
     app.add_handler(CommandHandler("resend", resend_code))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-
-def market_button():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛒 Open Marketplace", web_app={"url": MARKET_URL})]
-    ])
-
-async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🛒 Open the Moonso Link marketplace:",
-        reply_markup=market_button()
-    )
