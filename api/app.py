@@ -132,14 +132,12 @@ async def _handle_webhook(data: dict):
     if data.get("is_sender"):
         return {"status": "ignored"}
 
-    chat_id = data["chat_id"]
+    # Skip group messages
+    if data.get("is_group"):
+        print(f"IGNORED group message: {data.get('provider_chat_id')}")
+        return {"status": "ignored", "reason": "group_message"}
 
-    # Debug: detect WhatsApp group messages
-    print(f"🔍 WHATSAPP CHAT_ID: '{chat_id}'")
-    print(f"🔍 WHATSAPP DATA KEYS: {list(data.keys())}")
-    conv_party = data.get("conversation_party")
-    if conv_party:
-        print(f"🔍 CONVERSATION_PARTY: {conv_party}")
+    chat_id = data["chat_id"]
 
     phone = data["sender"]["attendee_specifics"]["phone_number"]
     name = data["sender"]["attendee_name"]

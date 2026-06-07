@@ -88,6 +88,12 @@ class LegacyConnectionWrapper:
         from psycopg.rows import dict_row
         if self._current_conn is None:
             self._current_conn = sync_pool.getconn()
+        else:
+            try:
+                self._current_conn.rollback()
+            except Exception:
+                sync_pool.putconn(self._current_conn)
+                self._current_conn = sync_pool.getconn()
         kwargs.setdefault('row_factory', dict_row)
         return self._current_conn.cursor(**kwargs)
 
